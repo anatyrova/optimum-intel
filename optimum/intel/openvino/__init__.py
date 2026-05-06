@@ -103,6 +103,7 @@ if is_diffusers_available():
         OVLatentConsistencyModelImg2ImgPipeline,
         OVLatentConsistencyModelPipeline,
         OVLTXPipeline,
+        OVLTX2Pipeline,
         OVPipelineForImage2Image,
         OVPipelineForInpainting,
         OVPipelineForText2Image,
