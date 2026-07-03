@@ -2396,31 +2396,6 @@ class Gemma3TextEncoderOpenVINOConfig(CLIPTextOpenVINOConfig):
         return outputs
 
 
-@register_in_tasks_manager("gemma3-text-encoder", *["feature-extraction"], library_name="diffusers")
-class Gemma3TextEncoderOpenVINOConfig(CLIPTextOpenVINOConfig):
-    NORMALIZED_CONFIG_CLASS = NormalizedConfig.with_args(
-        allow_new=True,
-        vocab_size="text_config.vocab_size",
-        sequence_length="text_config.max_position_embeddings",
-        num_layers="text_config.num_hidden_layers",
-    )
-
-    @property
-    def inputs(self) -> Dict[str, Dict[int, str]]:
-        return {
-            "input_ids": {0: "batch_size", 1: "sequence_length"},
-            "attention_mask": {0: "batch_size", 1: "sequence_length"},
-        }
-
-    @property
-    def outputs(self) -> Dict[str, Dict[int, str]]:
-        outputs = {"last_hidden_state": {0: "batch_size", 1: "sequence_length"}}
-        num_layers = getattr(self._normalized_config, "num_hidden_layers", 48)
-        for i in range(num_layers + 1):
-            outputs[f"hidden_states.{i}"] = {0: "batch_size", 1: "sequence_length"}
-        return outputs
-
-
 @register_in_tasks_manager("sana-transformer", *["semantic-segmentation"], library_name="diffusers")
 class SanaTransformerOpenVINOConfig(UNetOpenVINOConfig):
     NORMALIZED_CONFIG_CLASS = NormalizedConfig.with_args(
