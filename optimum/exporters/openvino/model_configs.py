@@ -130,13 +130,13 @@ from optimum.exporters.openvino.model_patcher import (
     KokoroModelPatcher,
     Lfm2ModelPatcher,
     Lfm2MoeModelPatcher,
-    LTX2ConnectorsPatcher,
-    LTX2TransformerPatcher,
     Llama4ImageEmbeddingsModelPatcher,
     Llama4TextModelPatcher,
     LlavaImageEmbeddingModelPatcher,
     LlavaNextVideoImageEmbeddingModelPatcher,
     LlavaQwen2ImageEmbeddingsModelPatcher,
+    LTX2ConnectorsPatcher,
+    LTX2TransformerPatcher,
     MairaImageEmbeddingModelPatcher,
     MambaPatcher,
     MarianModelPatcher,
@@ -343,10 +343,10 @@ def init_model_configs():
     if is_diffusers_available() and "text-to-video" not in TasksManager._DIFFUSERS_TASKS_TO_MODEL_MAPPINGS:
         TasksManager._DIFFUSERS_TASKS_TO_MODEL_MAPPINGS["text-to-video"] = {}
         TasksManager._DIFFUSERS_TASKS_TO_MODEL_MAPPINGS["text-to-video"]["ltx-video"] = "LTXPipeline"
-        TasksManager._DIFFUSERS_TASKS_TO_MODEL_MAPPINGS["text-to-video"]["ltx2-video"] = "LTX2Pipeline"
+        TasksManager._DIFFUSERS_TASKS_TO_MODEL_MAPPINGS["text-to-video"]["ltx2"] = "LTX2Pipeline"
     if is_diffusers_available() and "text-to-audio-video" not in TasksManager._DIFFUSERS_TASKS_TO_MODEL_MAPPINGS:
         TasksManager._DIFFUSERS_TASKS_TO_MODEL_MAPPINGS["text-to-audio-video"] = {}
-        TasksManager._DIFFUSERS_TASKS_TO_MODEL_MAPPINGS["text-to-audio-video"]["ltx2-video"] = "LTX2Pipeline"
+        TasksManager._DIFFUSERS_TASKS_TO_MODEL_MAPPINGS["text-to-audio-video"]["ltx2"] = "LTX2Pipeline"
 
 
 init_model_configs()

@@ -10343,7 +10343,9 @@ def _ltx2_connector_forward_patched(self, hidden_states, attention_mask=None, at
         # Create mask: 1s for valid token positions (left), 0s for register positions (right)
         valid_counts = binary_attn_mask.sum(dim=1)  # [B]
         pos_indices = torch.arange(seq_len, device=hidden_states.device).unsqueeze(0)
-        valid_mask = (pos_indices < valid_counts.unsqueeze(1)).unsqueeze(-1).to(padded_hidden_states.dtype)  # [B, L, 1]
+        valid_mask = (
+            (pos_indices < valid_counts.unsqueeze(1)).unsqueeze(-1).to(padded_hidden_states.dtype)
+        )  # [B, L, 1]
 
         # Valid tokens at left positions, registers at right positions (matches original behavior)
         hidden_states = valid_mask * padded_hidden_states + (1 - valid_mask) * registers
@@ -10359,7 +10361,9 @@ def _ltx2_connector_forward_patched(self, hidden_states, attention_mask=None, at
     return hidden_states, attention_mask
 
 
-def _ltx2_connectors_top_level_forward_patched(self, text_encoder_hidden_states, attention_mask, padding_side="left", scale_factor=8):
+def _ltx2_connectors_top_level_forward_patched(
+    self, text_encoder_hidden_states, attention_mask, padding_side="left", scale_factor=8
+):
     """
     Patched top-level forward for LTX2TextConnectors that makes per_layer_masked_mean_norm
     traceable by avoiding data-dependent indexing.
@@ -10370,8 +10374,9 @@ def _ltx2_connectors_top_level_forward_patched(self, text_encoder_hidden_states,
         text_encoder_hidden_states = text_encoder_hidden_states.unflatten(2, (self.config.caption_channels, -1))
 
     if self.config.get("per_modality_projections", False):
-        from diffusers.pipelines.ltx2.connectors import per_token_rms_norm
         import math
+
+        from diffusers.pipelines.ltx2.connectors import per_token_rms_norm
 
         norm_text_encoder_hidden_states = per_token_rms_norm(text_encoder_hidden_states)
         norm_text_encoder_hidden_states = norm_text_encoder_hidden_states.flatten(2, 3)
@@ -10675,7 +10680,7 @@ class LTX2TransformerPatcher(ModelPatcher):
         # (original prepare_attention_mask has data-dependent branches that break tracing)
         self._orig_processors = {}
         for name, module in self._model.named_modules():
-            if hasattr(module, 'processor') and hasattr(module, 'set_processor'):
+            if hasattr(module, "processor") and hasattr(module, "set_processor"):
                 self._orig_processors[name] = module.processor
                 module.set_processor(_LTX2TraceSafeAttnProcessor())
 
@@ -10732,5 +10737,5 @@ class LTX2TransformerPatcher(ModelPatcher):
 
         # Restore original attention processors
         for name, module in self._model.named_modules():
-            if name in self._orig_processors and hasattr(module, 'set_processor'):
+            if name in self._orig_processors and hasattr(module, "set_processor"):
                 module.set_processor(self._orig_processors[name])
