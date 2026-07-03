@@ -1050,7 +1050,9 @@ class OVPipelineForInpaintingTest(unittest.TestCase):
 class OVPipelineForText2VideoTest(unittest.TestCase):
     SUPPORTED_ARCHITECTURES = []
     if is_diffusers_version(">=", "0.28.2"):
-        SUPPORTED_ARCHITECTURES.extend(["ltx-video", "ltx2"])
+        SUPPORTED_ARCHITECTURES.extend(["ltx-video"])
+    if is_diffusers_version(">=", "0.37.0"):
+        SUPPORTED_ARCHITECTURES.extend(["ltx2"])
 
     OVMODEL_CLASS = OVPipelineForText2Video
     AUTOMODEL_CLASS = DiffusionPipeline
