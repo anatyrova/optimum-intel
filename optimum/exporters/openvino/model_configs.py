@@ -2369,7 +2369,7 @@ class Qwen3TextEncoderOpenVINOConfig(CLIPTextOpenVINOConfig):
         values = super().values_override or {}
         values.update({"output_hidden_states": True, "return_dict": True, "use_cache": False})
         return values
-        
+
 
 @register_in_tasks_manager("gemma3-text-encoder", *["feature-extraction"], library_name="diffusers")
 class Gemma3TextEncoderOpenVINOConfig(CLIPTextOpenVINOConfig):
