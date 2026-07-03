@@ -959,9 +959,7 @@ class LTX2TransformerDummyInputGenerator(DummyVisionInputGenerator):
             audio_mel_bins = 64 // self.audio_scale_factor
             return self.random_float_tensor([self.batch_size, 1, audio_num_frames * audio_mel_bins, 2])
         if input_name == "audio_encoder_hidden_states":
-            return self.random_float_tensor(
-                [self.batch_size, self.encoder_seq_length, self.caption_channels]
-            )
+            return self.random_float_tensor([self.batch_size, self.encoder_seq_length, self.caption_channels])
         if input_name == "audio_encoder_attention_mask":
             return self.random_float_tensor([self.batch_size, self.encoder_seq_length])
         return super().generate(input_name, framework, int_dtype, float_dtype)
@@ -991,6 +989,7 @@ class LTX2ConnectorsDummyInputGenerator(DummyVisionInputGenerator):
             return self.random_float_tensor([self.batch_size, self.sequence_length, self.input_channels])
         if input_name == "attention_mask":
             import torch
+
             return torch.ones(self.batch_size, self.sequence_length, dtype=torch.float32)
         return super().generate(input_name, framework, int_dtype, float_dtype)
 
@@ -1015,9 +1014,7 @@ class LTX2AudioVaeDecoderDummyInputGenerator(DummyVisionInputGenerator):
 
     def generate(self, input_name: str, framework: str = "pt", int_dtype: str = "int64", float_dtype: str = "fp32"):
         if input_name == "latent_sample":
-            return self.random_float_tensor(
-                [self.batch_size, self.latent_channels, self.num_frames, self.mel_bins]
-            )
+            return self.random_float_tensor([self.batch_size, self.latent_channels, self.num_frames, self.mel_bins])
         return super().generate(input_name, framework, int_dtype, float_dtype)
 
 
@@ -1041,9 +1038,7 @@ class LTX2VocoderDummyInputGenerator(DummyVisionInputGenerator):
 
     def generate(self, input_name: str, framework: str = "pt", int_dtype: str = "int64", float_dtype: str = "fp32"):
         if input_name == "hidden_states":
-            return self.random_float_tensor(
-                [self.batch_size, self.out_channels, self.num_frames, self.mel_bins]
-            )
+            return self.random_float_tensor([self.batch_size, self.out_channels, self.num_frames, self.mel_bins])
         return super().generate(input_name, framework, int_dtype, float_dtype)
 
 
