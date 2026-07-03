@@ -2038,7 +2038,7 @@ class OVLTX2Pipeline(OVDiffusionPipeline, OVTextualInversionLoaderMixin, LTX2Pip
             double_precision=t_config.get("rope_double_precision", True),
             rope_type=t_config.get("rope_type", "split"),
             num_attention_heads=t_config.get("audio_num_attention_heads", 32),
-            scale_factors=tuple(t_config.get("vae_scale_factors", [8, 32, 32])),
+            scale_factors=[t_config.get("audio_scale_factor", 4)],
             sampling_rate=t_config.get("audio_sampling_rate", 16000),
             hop_length=t_config.get("audio_hop_length", 160),
         )
