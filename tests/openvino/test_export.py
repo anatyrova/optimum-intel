@@ -35,7 +35,6 @@ from optimum.intel import (
     OVFluxPipeline,
     OVLatentConsistencyModelPipeline,
     OVLTXPipeline,
-    OVLTX2Pipeline,
     OVModelForAudioClassification,
     OVModelForCausalLM,
     OVModelForCustomTasks,
@@ -150,7 +149,7 @@ class ExportModelTest(unittest.TestCase):
         "flux.2-klein": {"transformer": "8.0", "vae_encoder": "8.0", "vae_decoder": "8.0"},
         "stable-diffusion-xl-refiner": {"vae_encoder": "128.0", "vae_decoder": "128.0"},
         "ltx-video": {"text_encoder": "8.0", "vae_encoder": "8.0", "vae_decoder": "8.0"},
-        "ltx2-video": {"text_encoder": "8.0", "vae_encoder": "8.0", "vae_decoder": "8.0"},
+        "ltx2": {"text_encoder": "8.0", "vae_encoder": "8.0", "vae_decoder": "8.0"},
     }
 
     if is_transformers_version(">=", "4.51"):

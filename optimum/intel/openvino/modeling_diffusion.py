@@ -1200,7 +1200,9 @@ class OVModelTextEncoder(OVPipelinePart):
         ):
             hidden_states = [torch.from_numpy(ov_outputs[out_name]) for out_name in self.hidden_states_output_names]
             model_outputs["hidden_states"] = hidden_states
-        elif (output_hidden_states or getattr(self.config, "output_hidden_states", False)) and "last_hidden_state" in model_outputs:
+        elif (
+            output_hidden_states or getattr(self.config, "output_hidden_states", False)
+        ) and "last_hidden_state" in model_outputs:
             # For models like LTX2 where config.output_hidden_states is True but the exported model
             # only has last_hidden_state, provide it as hidden_states for compatibility
             model_outputs["hidden_states"] = (model_outputs["last_hidden_state"],)
@@ -1835,7 +1837,9 @@ class OVModelAudioVaeDecoder(OVPipelinePart):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.mel_compression_ratio = getattr(self.config, "mel_compression_ratio", 4) if hasattr(self, "config") else 4
-        self.temporal_compression_ratio = getattr(self.config, "temporal_compression_ratio", 4) if hasattr(self, "config") else 4
+        self.temporal_compression_ratio = (
+            getattr(self.config, "temporal_compression_ratio", 4) if hasattr(self, "config") else 4
+        )
 
     def forward(self, latent_sample, return_dict=False):
         self.compile()
@@ -2170,7 +2174,9 @@ class OVLTX2Pipeline(OVDiffusionPipeline, OVTextualInversionLoaderMixin, LTX2Pip
         for component in self._ov_components:
             component.compile()
 
-    def _reshape_transformer(self, model, batch_size, height, width, num_images_per_prompt=-1, tokenizer_max_length=-1, num_frames=-1):
+    def _reshape_transformer(
+        self, model, batch_size, height, width, num_images_per_prompt=-1, tokenizer_max_length=-1, num_frames=-1
+    ):
         shapes = {}
         scalar_inputs = {"height", "width", "num_frames", "fps", "audio_num_frames", "rope_interpolation_scale"}
         for inputs in model.inputs:
@@ -2382,7 +2388,7 @@ if is_diffusers_version(">=", "0.32"):
     OV_TEXT2VIDEO_PIPELINES_MAPPING["ltx-video"] = OVLTXPipeline
     SUPPORTED_OV_PIPELINES.append(OVLTXPipeline)
 
-OV_TEXT2VIDEO_PIPELINES_MAPPING["ltx2-video"] = OVLTX2Pipeline
+OV_TEXT2VIDEO_PIPELINES_MAPPING["ltx2"] = OVLTX2Pipeline
 SUPPORTED_OV_PIPELINES.append(OVLTX2Pipeline)
 
 if is_diffusers_version(">=", "0.29.0"):
