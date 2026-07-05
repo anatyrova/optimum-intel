@@ -1879,8 +1879,6 @@ class _DummyAudioVae:
     """Minimal stub for audio_vae used during LTX2 video-only inference."""
 
     def __init__(self, latents_mean=None, latents_std=None):
-        self.latents_mean = latents_mean
-        self.latents_std = latents_std
         self.dtype = torch.float32
         self.mel_compression_ratio = 4
         self.temporal_compression_ratio = 4
@@ -1892,6 +1890,16 @@ class _DummyAudioVae:
             latent_channels = 8
 
         self.config = _Cfg()
+
+        packed_dim = self.config.latent_channels * (self.config.mel_bins // self.mel_compression_ratio)
+        if latents_mean is not None and latents_mean.numel() == packed_dim:
+            self.latents_mean = latents_mean
+        else:
+            self.latents_mean = torch.zeros(packed_dim)
+        if latents_std is not None and latents_std.numel() == packed_dim:
+            self.latents_std = latents_std
+        else:
+            self.latents_std = torch.ones(packed_dim)
 
     def decode(self, latents, return_dict=False):
         return (torch.zeros(1),)
@@ -2057,6 +2065,8 @@ class OVLTX2Pipeline(OVDiffusionPipeline, OVTextualInversionLoaderMixin, LTX2Pip
         # LTX2 requires text encoder to output hidden states for use in connectors
         if self.text_encoder is not None:
             self.text_encoder.config.output_hidden_states = True
+        if not isinstance(connectors, openvino.Model):
+            connectors = None
         self.connectors = (
             OVModelConnectors(connectors, self, DIFFUSION_MODEL_CONNECTORS_SUBFOLDER)
             if connectors is not None
@@ -2068,6 +2078,9 @@ class OVLTX2Pipeline(OVDiffusionPipeline, OVTextualInversionLoaderMixin, LTX2Pip
         self.tokenizer = tokenizer
 
         # Use real OV audio_vae decoder if available, otherwise use dummy
+        # Guard: when dispatched from OVDiffusionPipeline, config values (lists) may be passed instead of OV models
+        if not isinstance(audio_vae_decoder, openvino.Model):
+            audio_vae_decoder = None
         if audio_vae_decoder is not None:
             self.audio_vae_ov = OVModelAudioVaeDecoder(
                 audio_vae_decoder, self, DIFFUSION_MODEL_AUDIO_VAE_DECODER_SUBFOLDER
@@ -2099,6 +2112,8 @@ class OVLTX2Pipeline(OVDiffusionPipeline, OVTextualInversionLoaderMixin, LTX2Pip
             )
 
         # Use real OV vocoder if available, otherwise use dummy
+        if not isinstance(vocoder, openvino.Model):
+            vocoder = None
         if vocoder is not None:
             self.vocoder_ov = OVModelVocoder(vocoder, self, DIFFUSION_MODEL_VOCODER_SUBFOLDER)
             ov_vocoder = self.vocoder_ov
@@ -2177,6 +2192,11 @@ class OVLTX2Pipeline(OVDiffusionPipeline, OVTextualInversionLoaderMixin, LTX2Pip
     def _reshape_transformer(
         self, model, batch_size, height, width, num_images_per_prompt=-1, tokenizer_max_length=-1, num_frames=-1
     ):
+        if batch_size == -1 or num_images_per_prompt == -1:
+            batch_size = -1
+        else:
+            batch_size *= num_images_per_prompt * 2
+
         shapes = {}
         scalar_inputs = {"height", "width", "num_frames", "fps", "audio_num_frames", "rope_interpolation_scale"}
         for inputs in model.inputs:
@@ -2194,23 +2214,22 @@ class OVLTX2Pipeline(OVDiffusionPipeline, OVTextualInversionLoaderMixin, LTX2Pip
         return model
 
     def reshape(self, batch_size, height, width, num_images_per_prompt=-1, num_frames=-1):
+        self.is_dynamic = -1 in {batch_size, height, width, num_images_per_prompt}
         # Reshape transformer with custom logic for scalar inputs
         self.transformer.model = self._reshape_transformer(
             self.transformer.model, batch_size, height, width, num_images_per_prompt, num_frames=num_frames
         )
-        # Reshape vae_decoder and text_encoder
-        for ov_part in [self.vae_decoder, self.text_encoder]:
-            if ov_part is not None:
-                shapes = {}
-                for inputs in ov_part.model.inputs:
-                    shapes[inputs] = inputs.get_partial_shape()
-                    rank = inputs.get_partial_shape().rank.get_length()
-                    if rank >= 1:
-                        shapes[inputs][0] = batch_size
-                    for i in range(1, rank):
-                        shapes[inputs][i] = -1
-                ov_part.model.reshape(shapes)
-        # Reshape connectors, audio_vae, vocoder
+        # Reshape vae_decoder with proper height/width
+        self.vae_decoder.model = self._reshape_vae_decoder(
+            self.vae_decoder.model, height, width, num_images_per_prompt, num_frames=num_frames
+        )
+        # Reshape text_encoder with batch_size only (tokenizer_max_length stays dynamic for Gemma)
+        if self.text_encoder is not None:
+            self.text_encoder.model = self._reshape_text_encoder(self.text_encoder.model, batch_size, -1)
+        # Reshape connectors, audio_vae, vocoder with the full batch (accounts for guidance scale)
+        effective_batch = (
+            batch_size * num_images_per_prompt * 2 if batch_size > 0 and num_images_per_prompt > 0 else -1
+        )
         for ov_model_attr in [self.connectors, self.audio_vae_ov, self.vocoder_ov]:
             if ov_model_attr is not None:
                 shapes = {}
@@ -2218,7 +2237,7 @@ class OVLTX2Pipeline(OVDiffusionPipeline, OVTextualInversionLoaderMixin, LTX2Pip
                     shapes[inputs] = inputs.get_partial_shape()
                     rank = inputs.get_partial_shape().rank.get_length()
                     if rank >= 1:
-                        shapes[inputs][0] = batch_size
+                        shapes[inputs][0] = effective_batch
                     for i in range(1, rank):
                         shapes[inputs][i] = -1
                 ov_model_attr.model.reshape(shapes)
