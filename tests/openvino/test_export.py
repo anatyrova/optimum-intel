@@ -34,6 +34,7 @@ from optimum.intel import (
     OVFlux2KleinPipeline,
     OVFluxPipeline,
     OVLatentConsistencyModelPipeline,
+    OVLTX2Pipeline,
     OVLTXPipeline,
     OVModelForAudioClassification,
     OVModelForCausalLM,
@@ -96,6 +97,9 @@ class ExportModelTest(unittest.TestCase):
         "ltx-video": OVLTXPipeline,
         "kokoro": OVModelForTextToSpeechSeq2Seq,
     }
+
+    if is_diffusers_version(">=", "0.38.0"):
+        SUPPORTED_ARCHITECTURES.update({"ltx2": OVLTX2Pipeline})
 
     if is_diffusers_version(">=", "0.37.0"):
         SUPPORTED_ARCHITECTURES.update({"flux.2-klein": OVFlux2KleinPipeline})
