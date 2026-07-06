@@ -2407,8 +2407,9 @@ if is_diffusers_version(">=", "0.32"):
     OV_TEXT2VIDEO_PIPELINES_MAPPING["ltx-video"] = OVLTXPipeline
     SUPPORTED_OV_PIPELINES.append(OVLTXPipeline)
 
-OV_TEXT2VIDEO_PIPELINES_MAPPING["ltx2"] = OVLTX2Pipeline
-SUPPORTED_OV_PIPELINES.append(OVLTX2Pipeline)
+if is_diffusers_version(">=", "0.38.0"):
+    OV_TEXT2VIDEO_PIPELINES_MAPPING["ltx2"] = OVLTX2Pipeline
+    SUPPORTED_OV_PIPELINES.append(OVLTX2Pipeline)
 
 if is_diffusers_version(">=", "0.29.0"):
     SUPPORTED_OV_PIPELINES.extend(

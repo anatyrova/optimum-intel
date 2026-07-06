@@ -115,8 +115,6 @@ class OVCLIExportTestCase(unittest.TestCase):
         ("inpainting", "flux-fill"),
         ("text-to-image", "sana"),
         ("text-to-video", "ltx-video"),
-        ("text-to-video", "ltx2"),
-        ("text-to-audio-video", "ltx2"),
         ("feature-extraction", "sam"),
         ("text-to-audio", "speecht5"),
         ("zero-shot-image-classification", "clip"),
@@ -127,6 +125,14 @@ class OVCLIExportTestCase(unittest.TestCase):
         SUPPORTED_ARCHITECTURES.extend(
             [
                 ("text-to-image", "flux.2-klein"),
+            ]
+        )
+
+    if is_diffusers_version(">=", "0.38.0"):
+        SUPPORTED_ARCHITECTURES.extend(
+            [
+                ("text-to-video", "ltx2"),
+                ("text-to-audio-video", "ltx2"),
             ]
         )
 
