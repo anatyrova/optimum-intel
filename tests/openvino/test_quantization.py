@@ -81,7 +81,7 @@ from optimum.intel.openvino.utils import TemporaryDirectory
 from copy import deepcopy
 
 from optimum.intel.openvino.quantization import InferRequestWrapper, OVCalibrationDatasetBuilder
-from optimum.intel.utils.import_utils import is_transformers_version, is_nncf_version
+from optimum.intel.utils.import_utils import is_openvino_version, is_transformers_version, is_nncf_version
 from utils_tests import (
     MODEL_NAMES,
     get_num_quantized_nodes,
@@ -90,6 +90,7 @@ from utils_tests import (
     get_supported_model_for_library,
     TEST_NAME_TO_MODEL_TYPE,
     OPENVINO_DEVICE,
+    HUB_MODEL_NAMES,
 )
 
 _TASK_TO_DATASET = {
@@ -135,8 +136,8 @@ class OVQuantizerTest(unittest.TestCase):
         (OVModelForSequenceClassification, "bert", 32, 35),
         (OVModelForCausalLM, "gpt2", 31, 22),
         (OVSentenceTransformer, "sentence-transformers-bert", 12, 15),
-        (OVModelForFeatureExtraction, "blenderbot", 33, 35),
-        (OVModelForMaskedLM, "roberta", 32, 34),
+        (OVModelForFeatureExtraction, "blenderbot", 33, 35 if is_transformers_version("<", "5") else 36),
+        (OVModelForMaskedLM, "roberta", 32, 34 if is_transformers_version("<", "5") else 35),
         (OVModelForZeroShotImageClassification, "clip", 65, 65),
     )
     SUPPORTED_ARCHITECTURES_OV_MODEL_WITH_AUTO_DATASET = [
@@ -269,7 +270,7 @@ class OVQuantizerTest(unittest.TestCase):
                 "model": 33,
             },
             {
-                "model": {"int8": 35},
+                "model": {"int8": 35 if is_transformers_version("<", "5") else 36},
             },
         ),
         (
@@ -299,7 +300,7 @@ class OVQuantizerTest(unittest.TestCase):
                 "model": 32,
             },
             {
-                "model": {"int8": 34},
+                "model": {"int8": 34 if is_transformers_version("<", "5") else 35},
             },
         ),
         (
@@ -342,14 +343,11 @@ class OVQuantizerTest(unittest.TestCase):
             ),
             {"encoder": 30, "decoder": 52, "decoder_with_past": 61}
             if is_transformers_version("<=", "4.45")
-            else {
-                "encoder": 30,
-                "decoder": 52,
-            },
+            else {"encoder": 30, "decoder": 52},
             (
                 {"encoder": {"int8": 32}, "decoder": {"int8": 52}, "decoder_with_past": {"int8": 42}}
                 if is_transformers_version("<=", "4.45")
-                else {"encoder": {"int8": 32}, "decoder": {"int8": 52}}
+                else {"encoder": {"int8": 32}, "decoder": {"int8": 52 if is_transformers_version("<", "5") else 53}}
             ),
         ),
         (
@@ -409,6 +407,35 @@ class OVQuantizerTest(unittest.TestCase):
             },
         ),
     ]
+
+    if is_transformers_version(">=", "4.57.0"):
+        SUPPORTED_ARCHITECTURES_OV_MODEL_WITH_AUTO_DATASET.extend(
+            [
+                (
+                    OVModelForVisualCausalLM,
+                    "qwen3_vl",
+                    OVQuantizationConfig(
+                        bits=8,
+                        dataset="contextual",
+                        num_samples=1,
+                    ),
+                    {
+                        "lm_model": 14,
+                        "text_embeddings_model": 0,
+                        "vision_embeddings_model": 1,
+                        "vision_embeddings_merger_model": 44,
+                        "vision_embeddings_pos_model": 0,
+                    },
+                    {
+                        "lm_model": {"int8": 15},
+                        "text_embeddings_model": {"int8": 1},
+                        "vision_embeddings_model": {"int8": 1},
+                        "vision_embeddings_merger_model": {"int8": 32},
+                        "vision_embeddings_pos_model": {"int8": 1},
+                    },
+                ),
+            ]
+        )
 
     @staticmethod
     def get_calibration_dataset(
@@ -567,7 +594,9 @@ class OVWeightCompressionTest(unittest.TestCase):
         (OVModelForCausalLM, "gpt2", 44, 44),
     )
 
-    SUPPORTED_ARCHITECTURES_WITH_EXPECTED_4BIT_COMPRESSED_MATMULS = ((OVModelForCausalLM, "opt125m", 62, 43),)
+    SUPPORTED_ARCHITECTURES_WITH_EXPECTED_4BIT_COMPRESSED_MATMULS = (
+        (OVModelForCausalLM, "opt125m", 62 if is_transformers_version("<", "5") else 64, 43),
+    )
     SUPPORTED_ARCHITECTURES_WITH_EXPECTED_4BIT_AUTOCOMPRESSED_MATMULS = ((OVModelForCausalLM, "opt125m", 0, 74),)
     SUPPORTED_ARCHITECTURES_STATEFUL_WITH_EXPECTED_8BIT_COMPRESSED_MATMULS = ((OVModelForCausalLM, "gpt2", 44, 44),)
 
@@ -584,7 +613,7 @@ class OVWeightCompressionTest(unittest.TestCase):
             "gpt2",
             False,
             dict(bits=4, dtype="mxfp4", group_size=32),
-            {"model": {"int8": 4, "f4e2m1": 20, "f8e8m0": 20}},
+            {"model": {"f4e2m1": 20, "f8e8m0": 22, "f8e4m3": 2}},
         ),
         (
             OVModelForCausalLM,
@@ -881,6 +910,26 @@ class OVWeightCompressionTest(unittest.TestCase):
         ),
         (
             OVModelForVisualCausalLM,
+            "qwen3_vl",
+            False,
+            dict(
+                bits=4,
+                group_size=8,
+                dataset="contextual",
+                ratio=0.8,
+                sensitivity_metric="mean_activation_magnitude",
+                num_samples=1,
+            ),
+            {
+                "lm_model": {"int8": 12, "int4": 18},
+                "text_embeddings_model": {"int8": 1},
+                "vision_embeddings_model": {"int8": 1},
+                "vision_embeddings_merger_model": {"int8": 32},
+                "vision_embeddings_pos_model": {"int8": 1},
+            },
+        ),
+        (
+            OVModelForVisualCausalLM,
             "phi3_v",
             True,
             dict(
@@ -1014,8 +1063,6 @@ class OVWeightCompressionTest(unittest.TestCase):
         (OVStableDiffusionXLPipeline, "stable-diffusion-xl", False),
         (OVModelOpenCLIPForZeroShotImageClassification, "open-clip", False),
         (OVModelForVisualCausalLM, "llava", False),
-        (OVModelForVisualCausalLM, "llava_next_video", False),
-        (OVModelForVisualCausalLM, "minicpmv", True),
         (OVModelForVisualCausalLM, "qwen2_vl", False),
     ]
 
@@ -1025,8 +1072,50 @@ class OVWeightCompressionTest(unittest.TestCase):
     if is_transformers_version("<", "4.52.0"):
         SUPPORTED_ARCHITECTURES_WITH_AUTO_COMPRESSION.append((OVModelForVisualCausalLM, "minicpmo", True))
 
-    if is_transformers_version(">=", "4.54.0"):
+    if is_transformers_version(">=", "4.48.0"):
+        SUPPORTED_ARCHITECTURES_WITH_AUTO_COMPRESSION.append((OVModelForCausalLM, "cohere2", False))
+
+    # gemma3n openvino>=2026.2.0 bequse it needs erfinv operation,
+    # quantization tests will be moved to openvino==2026.2.0 in CVS-189051
+    if is_transformers_version(">=", "5.0") and is_openvino_version(">=", "2026.2.0"):
+        SUPPORTED_ARCHITECTURES_WITH_AUTO_COMPRESSION.append((OVModelForVisualCausalLM, "gemma3n", False))
+
+    if is_transformers_version(">=", "4.53.0"):
+        SUPPORTED_ARCHITECTURES_WITH_AUTO_COMPRESSION.append((OVModelForCausalLM, "smollm3", False))
+
+    if is_transformers_version(">=", "4.54.0") and is_transformers_version("<", "5"):
         SUPPORTED_ARCHITECTURES_WITH_AUTO_COMPRESSION.append((OVModelForCausalLM, "exaone4", True))
+
+    if is_transformers_version(">=", "4.57.0"):
+        SUPPORTED_ARCHITECTURES_WITH_AUTO_COMPRESSION.append((OVModelForVisualCausalLM, "qwen3_vl", False))
+        SUPPORTED_ARCHITECTURES_WITH_AUTO_COMPRESSION.append((OVModelForCausalLM, "hunyuan_v1_dense", False))
+
+    if is_transformers_version(">=", "4.57"):
+        SUPPORTED_ARCHITECTURES_WITH_AUTO_COMPRESSION.append(
+            (OVModelForFeatureExtraction, "qwen3_vl_embedding", False)
+        )
+
+    if is_transformers_version("==", "4.57.6"):
+        SUPPORTED_ARCHITECTURES_WITH_AUTO_COMPRESSION.append((OVModelForSpeechSeq2Seq, "qwen3_asr", True))
+
+    if is_transformers_version("<", "5"):
+        SUPPORTED_ARCHITECTURES_WITH_AUTO_COMPRESSION.extend(
+            [
+                (OVModelForVisualCausalLM, "llava_next_video", False),
+                (OVModelForVisualCausalLM, "minicpmv", True),
+            ]
+        )
+
+    if is_transformers_version(">=", "4.49.0") and is_transformers_version("<=", "4.57.6"):
+        SUPPORTED_ARCHITECTURES_WITH_AUTO_COMPRESSION.append((OVModelForVisualCausalLM, "videochat_flash_qwen", True))
+
+    if is_transformers_version(">=", "5.2.0") and is_transformers_version("<", "5.3.0"):
+        SUPPORTED_ARCHITECTURES_WITH_AUTO_COMPRESSION.append((OVModelForVisualCausalLM, "qwen3_5", False))
+        SUPPORTED_ARCHITECTURES_WITH_AUTO_COMPRESSION.append((OVModelForVisualCausalLM, "qwen3_5_moe", False))
+
+    if is_transformers_version(">=", "5.5.0"):
+        SUPPORTED_ARCHITECTURES_WITH_AUTO_COMPRESSION.append((OVModelForVisualCausalLM, "gemma4", False))
+        SUPPORTED_ARCHITECTURES_WITH_AUTO_COMPRESSION.append((OVModelForVisualCausalLM, "gemma4_moe", False))
 
     SUPPORTED_ARCHITECTURES_WITH_HYBRID_QUANTIZATION = [
         (OVStableDiffusionPipeline, "stable-diffusion", 72, 195),
@@ -1093,7 +1182,7 @@ class OVWeightCompressionTest(unittest.TestCase):
             {"bits": 4, "group_size": 8, "ratio": 0.5},
             {
                 "decoder": {"int8": 40, "int4": 4},
-                "encoder": {"int8": 24, "int4": 4},
+                "encoder": {"int8": 46, "int4": 6},
             },
         ),
     ]
@@ -1114,8 +1203,12 @@ class OVWeightCompressionTest(unittest.TestCase):
             "llama",
             {
                 "model": {
-                    "names": ["__module.layers.1.self_attn.v_proj/aten::linear/MatMul"],
-                    "patterns": ["__module.layers.\\d.self_attn.o_proj/aten::linear/MatMul"],
+                    "names": [
+                        f"__module.layers.1.self_attn.v_proj/{'aten' if is_transformers_version('<', '5') else 'ov_ext'}::linear/MatMul"
+                    ],
+                    "patterns": [
+                        f"__module.layers.\\d.self_attn.o_proj/{'aten' if is_transformers_version('<', '5') else 'ov_ext'}::linear/MatMul"
+                    ],
                 }
             },
         ),
@@ -1166,8 +1259,12 @@ class OVWeightCompressionTest(unittest.TestCase):
             expected.add("llama4")
         if is_transformers_version("<", "4.54"):
             expected.add("exaone4")
+        if is_transformers_version("<", "4.57"):
+            expected.add("qwen3_vl")
         if is_transformers_version(">=", "4.54"):
             expected.update({"llava-qwen2", "phi3_v", "minicpmo"})
+        if is_transformers_version(">=", "5"):
+            expected.update({"llama4", "llava_next_video", "minicpmv", "internvl_chat", "exaone4"})
 
         all_model_type = {config[1] for config in cls.TRANSFORMERS_4BIT_CONFIGURATIONS}
         filtered_model_type = {config[1] for config in cls.LOAD_IN_4_BITS_SCOPE}
@@ -1255,7 +1352,10 @@ class OVWeightCompressionTest(unittest.TestCase):
             self.assertEqual(OVWeightQuantizationConfig().to_dict(), loaded_config.quantization_config.to_dict())
             self.assertFalse(model.model.has_rt_info(["runtime_options", "KV_CACHE_PRECISION"]))
 
-    @parameterized.expand(SUPPORTED_ARCHITECTURES_WITH_AUTO_COMPRESSION)
+    @parameterized.expand(
+        SUPPORTED_ARCHITECTURES_WITH_AUTO_COMPRESSION,
+        name_func=lambda testcase_func, param_num, params: f"{testcase_func.__name__}_{parameterized.to_safe_name(params.args[1])}",
+    )
     def test_ovmodel_load_with_compressed_weights(self, model_cls, model_type, trust_remote_code):
         model = model_cls.from_pretrained(
             MODEL_NAMES[model_type],
@@ -1400,11 +1500,11 @@ class OVWeightCompressionTest(unittest.TestCase):
     def test_ovmodel_default_ignored_scope(self, model_cls, model_type, expected_ignored_scope_per_model):
         with unittest.mock.patch.dict(
             "optimum.intel.openvino.configuration._DEFAULT_IGNORED_SCOPE_CONFIGS",
-            {MODEL_NAMES[model_type]: expected_ignored_scope_per_model},
+            {HUB_MODEL_NAMES[model_type]: expected_ignored_scope_per_model},
             clear=False,
         ):
             with TemporaryDirectory() as tmp_dir:
-                model_id = MODEL_NAMES[model_type]
+                model_id = HUB_MODEL_NAMES[model_type]
                 model = model_cls.from_pretrained(
                     model_id,
                     export=True,
@@ -1477,7 +1577,10 @@ class OVWeightCompressionTest(unittest.TestCase):
         expected_int8 = {k: {"int8": v} for k, v in expected_int8.items()}
         check_compression_state_per_model(self, model.ov_models, expected_int8)
 
-    @parameterized.expand(SUPPORTED_ARCHITECTURES_WITH_AUTO_COMPRESSION)
+    @parameterized.expand(
+        SUPPORTED_ARCHITECTURES_WITH_AUTO_COMPRESSION,
+        name_func=lambda testcase_func, param_num, params: f"{testcase_func.__name__}_{parameterized.to_safe_name(params.args[1])}",
+    )
     def test_ovmodel_load_with_uncompressed_weights(self, model_cls, model_type, trust_remote_code):
         model = model_cls.from_pretrained(
             MODEL_NAMES[model_type], export=True, load_in_8bit=False, trust_remote_code=trust_remote_code
@@ -1600,6 +1703,35 @@ class OVWeightCompressionTest(unittest.TestCase):
             ),
         )
         self.assertTrue(all(len(sample["input_ids"][0]) == 64 for sample in dataset["model"].get_data()))
+
+    @parameterized.expand(
+        [
+            ("gemma4",),
+            ("gemma4_moe",),
+        ]
+        if is_transformers_version(">=", "5.5.0")
+        else [],
+        skip_on_empty=True,
+        name_func=lambda testcase_func, param_num, params: f"{testcase_func.__name__}_{parameterized.to_safe_name(params.args[0])}",
+    )
+    def test_build_dataset(self, model_arch):
+        model_id = MODEL_NAMES[model_arch]
+        model = OVModelForVisualCausalLM.from_pretrained(model_id, export=True, load_in_8bit=False)
+        dataset_builder = OVCalibrationDatasetBuilder(model)
+        dataset = dataset_builder.build_from_quantization_config(
+            OVPipelineQuantizationConfig(
+                quantization_configs={
+                    "lm_model": OVWeightQuantizationConfig(
+                        bits=4,
+                        group_size=64,
+                        num_samples=1,
+                        scale_estimation=True,
+                        dataset="contextual",
+                        processor=model_id,
+                    )
+                }
+            ),
+        )
 
 
 class OVPipelineQuantizationTest(unittest.TestCase):
@@ -1741,34 +1873,38 @@ class OVPipelineQuantizationTest(unittest.TestCase):
                 num_samples=1,
                 processor=MODEL_NAMES["whisper"],
             ),
-            {"encoder": 14, "decoder": 22},
-            {"encoder": {"int8": 14}, "decoder": {"int8": 22}},
-        ),
-        (
-            OVModelForVisualCausalLM,
-            "internvl_chat",
-            True,
-            dict(
-                quantization_configs={
-                    "lm_model": dict(bits=8, weight_only=True),
-                    "vision_embeddings_model": dict(bits=8, weight_only=False),
-                },
-                dataset="contextual",
-                num_samples=1,
-                default_config=dict(bits=8, sym=True, weight_only=True),
-            ),
-            {
-                "lm_model": 0,
-                "text_embeddings_model": 0,
-                "vision_embeddings_model": 15,
-            },
-            {
-                "lm_model": {"int8": 30},
-                "text_embeddings_model": {"int8": 1},
-                "vision_embeddings_model": {"int8": 11},
-            },
+            {"encoder": 26, "decoder": 22},
+            {"encoder": {"int8": 26}, "decoder": {"int8": 22}},
         ),
     ]
+
+    if is_transformers_version("<", "5"):
+        PIPELINE_QUANTIZATION_SCOPE.append(
+            (
+                OVModelForVisualCausalLM,
+                "internvl_chat",
+                True,
+                dict(
+                    quantization_configs={
+                        "lm_model": dict(bits=8, weight_only=True),
+                        "vision_embeddings_model": dict(bits=8, weight_only=False),
+                    },
+                    dataset="contextual",
+                    num_samples=1,
+                    default_config=dict(bits=8, sym=True, weight_only=True),
+                ),
+                {
+                    "lm_model": 0,
+                    "text_embeddings_model": 0,
+                    "vision_embeddings_model": 15,
+                },
+                {
+                    "lm_model": {"int8": 30},
+                    "text_embeddings_model": {"int8": 1},
+                    "vision_embeddings_model": {"int8": 11},
+                },
+            ),
+        )
 
     if is_transformers_version(">=", "4.49.0") and is_transformers_version("<", "4.54.0"):
         PIPELINE_QUANTIZATION_SCOPE.extend(
@@ -1954,7 +2090,7 @@ class OVQuantizerQATest(unittest.TestCase):
             tokenizer = AutoTokenizer.from_pretrained(model_name)
             quantizer = OVQuantizer.from_pretrained(transformers_model, device=OPENVINO_DEVICE)
             calibration_dataset = quantizer.get_calibration_dataset(
-                "squadshifts",
+                "ludwigschmidt/squadshifts",
                 dataset_config_name="new_wiki",
                 preprocess_function=partial(preprocess_function, tokenizer=tokenizer),
                 num_samples=10,
@@ -1966,7 +2102,7 @@ class OVQuantizerQATest(unittest.TestCase):
 
             # Test that inference on quantized model works
             model = OVModelForQuestionAnswering.from_pretrained(tmp_dir, device=OPENVINO_DEVICE)
-            tokens = tokenizer.encode_plus(
+            tokens = tokenizer(
                 "This is a sample question", "This is a sample context", add_special_tokens=True, return_tensors="pt"
             )
             model(**tokens, return_dict=True)
@@ -2441,7 +2577,7 @@ def check_model_inference(ov_model, model_id, trust_remote_code):
         if isinstance(ov_model, OVModelForSpeechSeq2Seq):
             input_features = torch.randn((1, ov_model.config.num_mel_bins, 3000), dtype=torch.float32)
             generate_kwrgs = {}
-            if is_transformers_version(">=", "4.50"):
+            if is_transformers_version(">=", "4.50") and is_transformers_version("<", "5"):
                 generate_kwrgs = {"use_model_defaults": False}
             ov_model.generate(input_features, generation_config=gen_config, **generate_kwrgs)
         else:
