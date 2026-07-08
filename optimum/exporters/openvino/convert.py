@@ -1204,7 +1204,9 @@ def get_ltx2_video_models_for_export(pipeline, exporter, int_dtype, float_dtype,
             bsz, seq_len = attention_mask.shape
             causal_mask = attention_mask[:, None, None, :].to(dtype=torch.float32)
             causal_mask = causal_mask.expand(bsz, 1, seq_len, seq_len).clone()
-            causal_positions = torch.tril(torch.ones(seq_len, seq_len, dtype=torch.float32))
+            causal_positions = torch.tril(
+                torch.ones(seq_len, seq_len, dtype=torch.float32, device=attention_mask.device)
+            )
             causal_mask = causal_mask * causal_positions[None, None, :, :]
             causal_mask = (1.0 - causal_mask) * torch.finfo(torch.float32).min
             attention_mask = {"full_attention": causal_mask, "sliding_attention": causal_mask}

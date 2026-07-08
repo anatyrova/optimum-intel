@@ -1423,11 +1423,11 @@ class OVModelConnectors(OVPipelinePart):
 
         ov_outputs = self.request(model_inputs, share_inputs=True).to_dict()
 
-        results = []
-        for key, value in ov_outputs.items():
-            results.append(torch.from_numpy(value))
-
-        return tuple(results)
+        # Return in the fixed order expected by the diffusers pipeline unpacking:
+        # connector_prompt_embeds, connector_audio_prompt_embeds, connector_attention_mask
+        output_names = ["video_text_embedding", "audio_text_embedding", "connector_attention_mask"]
+        named = {next(iter(k.names)): torch.from_numpy(v) for k, v in ov_outputs.items()}
+        return tuple(named[name] for name in output_names)
 
 
 class OVModelVaeEncoder(OVPipelinePart):

@@ -10522,6 +10522,8 @@ def _ltx2_connector_forward_patched(self, hidden_states, attention_mask=None, at
     batch_size, seq_len, hidden_dim = hidden_states.shape
 
     if self.learnable_registers is not None:
+        if attention_mask is None:
+            raise ValueError("attention_mask is required when learnable_registers are present")
         num_register_repeats = seq_len // self.num_learnable_registers
         registers = torch.tile(self.learnable_registers, (num_register_repeats, 1))  # [seq_len, dim]
         registers = registers.unsqueeze(0).expand(batch_size, -1, -1)  # [B, seq_len, dim]
