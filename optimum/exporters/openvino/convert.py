@@ -1103,7 +1103,7 @@ def get_diffusion_models_for_export_ext(
     elif is_ltx_video:
         is_ltx2 = pipeline.__class__.__name__.startswith("LTX2")
         if is_ltx2:
-            models_for_export = get_ltx2_video_models_for_export(pipeline, exporter, int_dtype, float_dtype, task=task)
+            models_for_export = get_ltx2_video_models_for_export(pipeline, exporter, int_dtype, float_dtype)
         else:
             models_for_export = get_ltx_video_models_for_export(pipeline, exporter, int_dtype, float_dtype)
     else:
@@ -1185,38 +1185,10 @@ def get_ltx_video_models_for_export(pipeline, exporter, int_dtype, float_dtype):
     return models_for_export
 
 
-def get_ltx2_video_models_for_export(pipeline, exporter, int_dtype, float_dtype, task=None):
+def get_ltx2_video_models_for_export(pipeline, exporter, int_dtype, float_dtype):
     models_for_export = {}
 
-    # Text encoder (Gemma3) - wrap to always output hidden states.
-    # Build explicit float additive masks from the 2D attention_mask so that
-    # mask creation is fully traceable (no data-dependent boolean ops).
-    # SDPA handles float masks correctly on real tokens; padding-position
-    # values differ from standard boolean masks but are unused downstream.
     text_encoder = pipeline.text_encoder
-    text_encoder.config.output_hidden_states = True
-    orig_forward = text_encoder.forward
-
-    def text_encoder_forward(input_ids, attention_mask=None, **kwargs):
-        if attention_mask is not None and attention_mask.dim() == 2:
-            import torch
-
-            bsz, seq_len = attention_mask.shape
-            causal_mask = attention_mask[:, None, None, :].to(dtype=torch.float32)
-            causal_mask = causal_mask.expand(bsz, 1, seq_len, seq_len).clone()
-            causal_positions = torch.tril(
-                torch.ones(seq_len, seq_len, dtype=torch.float32, device=attention_mask.device)
-            )
-            causal_mask = causal_mask * causal_positions[None, None, :, :]
-            causal_mask = (1.0 - causal_mask) * torch.finfo(torch.float32).min
-            attention_mask = {"full_attention": causal_mask, "sliding_attention": causal_mask}
-        outputs = orig_forward(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True)
-        result = {"last_hidden_state": outputs.hidden_states[-1]}
-        for i, hs in enumerate(outputs.hidden_states):
-            result[f"hidden_states.{i}"] = hs
-        return result
-
-    text_encoder.forward = text_encoder_forward
 
     export_config_constructor = TasksManager.get_exporter_config_constructor(
         model=text_encoder,
@@ -1287,8 +1259,8 @@ def get_ltx2_video_models_for_export(pipeline, exporter, int_dtype, float_dtype,
     vae_decoder_export_config.runtime_options = {"ACTIVATIONS_SCALE_FACTOR": "8.0"}
     models_for_export["vae_decoder"] = (vae_decoder, vae_decoder_export_config)
 
-    # Audio VAE decoder and vocoder for text-to-audio-video task
-    if task == "text-to-audio-video" and hasattr(pipeline, "audio_vae") and pipeline.audio_vae is not None:
+    # Audio VAE decoder and vocoder
+    if hasattr(pipeline, "audio_vae") and pipeline.audio_vae is not None:
         # Audio VAE decoder
         audio_vae_decoder = copy.deepcopy(pipeline.audio_vae)
         audio_vae_decoder.forward = lambda latent_sample: {"sample": audio_vae_decoder.decode(z=latent_sample)}

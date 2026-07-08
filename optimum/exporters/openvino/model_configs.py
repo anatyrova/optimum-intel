@@ -138,6 +138,7 @@ from optimum.exporters.openvino.model_patcher import (
     LlavaNextVideoImageEmbeddingModelPatcher,
     LlavaQwen2ImageEmbeddingsModelPatcher,
     LTX2ConnectorsPatcher,
+    LTX2TextEncoderPatcher,
     LTX2TransformerPatcher,
     MairaImageEmbeddingModelPatcher,
     MambaPatcher,
@@ -346,9 +347,6 @@ def init_model_configs():
         TasksManager._DIFFUSERS_TASKS_TO_MODEL_MAPPINGS["text-to-video"] = {}
         TasksManager._DIFFUSERS_TASKS_TO_MODEL_MAPPINGS["text-to-video"]["ltx-video"] = "LTXPipeline"
         TasksManager._DIFFUSERS_TASKS_TO_MODEL_MAPPINGS["text-to-video"]["ltx2"] = "LTX2Pipeline"
-    if is_diffusers_available() and "text-to-audio-video" not in TasksManager._DIFFUSERS_TASKS_TO_MODEL_MAPPINGS:
-        TasksManager._DIFFUSERS_TASKS_TO_MODEL_MAPPINGS["text-to-audio-video"] = {}
-        TasksManager._DIFFUSERS_TASKS_TO_MODEL_MAPPINGS["text-to-audio-video"]["ltx2"] = "LTX2Pipeline"
 
 
 init_model_configs()
@@ -2379,6 +2377,7 @@ class Gemma3TextEncoderOpenVINOConfig(CLIPTextOpenVINOConfig):
         sequence_length="text_config.max_position_embeddings",
         num_layers="text_config.num_hidden_layers",
     )
+    _MODEL_PATCHER = LTX2TextEncoderPatcher
 
     @property
     def inputs(self) -> Dict[str, Dict[int, str]]:

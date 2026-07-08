@@ -10869,6 +10869,33 @@ class _LTX2TraceSafeAttnProcessor:
         return hidden_states
 
 
+class LTX2TextEncoderPatcher(ModelPatcher):
+    def __init__(self, config, model, model_kwargs=None):
+        model.config.output_hidden_states = True
+        super().__init__(config, model, model_kwargs)
+
+        orig_forward = self.orig_forward
+
+        def patched_forward(input_ids, attention_mask=None, **kwargs):
+            if attention_mask is not None and attention_mask.dim() == 2:
+                bsz, seq_len = attention_mask.shape
+                causal_mask = attention_mask[:, None, None, :].to(dtype=torch.float32)
+                causal_mask = causal_mask.expand(bsz, 1, seq_len, seq_len).clone()
+                causal_positions = torch.tril(
+                    torch.ones(seq_len, seq_len, dtype=torch.float32, device=attention_mask.device)
+                )
+                causal_mask = causal_mask * causal_positions[None, None, :, :]
+                causal_mask = (1.0 - causal_mask) * torch.finfo(torch.float32).min
+                attention_mask = {"full_attention": causal_mask, "sliding_attention": causal_mask}
+            outputs = orig_forward(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True)
+            result = {"last_hidden_state": outputs.hidden_states[-1]}
+            for i, hs in enumerate(outputs.hidden_states):
+                result[f"hidden_states.{i}"] = hs
+            return result
+
+        self.patched_forward = patched_forward
+
+
 class LTX2TransformerPatcher(ModelPatcher):
     def __enter__(self):
         super().__enter__()

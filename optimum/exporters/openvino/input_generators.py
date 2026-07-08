@@ -927,7 +927,7 @@ class LTX2TransformerDummyInputGenerator(DummyVisionInputGenerator):
         self.audio_scale_factor = normalized_config.config.audio_scale_factor
         self.cross_attention_dim = normalized_config.config.cross_attention_dim
         self.caption_channels = normalized_config.config.caption_channels
-        self.encoder_seq_length = 128
+        self.encoder_seq_length = kwargs.get("sequence_length", DEFAULT_DUMMY_SHAPES["sequence_length"])
 
     def generate(self, input_name: str, framework: str = "pt", int_dtype: str = "int64", float_dtype: str = "fp32"):
         import torch
@@ -973,7 +973,7 @@ class LTX2ConnectorsDummyInputGenerator(DummyVisionInputGenerator):
         task: str,
         normalized_config: NormalizedVisionConfig,
         batch_size: int = DEFAULT_DUMMY_SHAPES["batch_size"],
-        sequence_length: int = 128,
+        sequence_length: int = DEFAULT_DUMMY_SHAPES["sequence_length"],
         **kwargs,
     ):
         super().__init__(task, normalized_config, batch_size, **kwargs)

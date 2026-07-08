@@ -132,7 +132,6 @@ class OVCLIExportTestCase(unittest.TestCase):
         SUPPORTED_ARCHITECTURES.extend(
             [
                 ("text-to-video", "ltx2"),
-                ("text-to-audio-video", "ltx2"),
             ]
         )
 
