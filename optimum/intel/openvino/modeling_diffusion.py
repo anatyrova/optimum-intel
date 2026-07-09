@@ -1876,7 +1876,7 @@ class OVModelVocoder(OVPipelinePart):
 
 
 class _DummyAudioVae:
-    """Minimal stub for audio_vae used during LTX2 video-only inference."""
+    """Compatibility shim for the generic OVDiffusionPipeline dispatch path that doesn't load LTX2-specific components."""
 
     def __init__(self, latents_mean=None, latents_std=None):
         self.dtype = torch.float32
@@ -1906,7 +1906,7 @@ class _DummyAudioVae:
 
 
 class _DummyVocoder:
-    """Minimal stub for vocoder used during LTX2 video-only inference."""
+    """Compatibility shim for the generic OVDiffusionPipeline dispatch path that doesn't load LTX2-specific components."""
 
     def __call__(self, mel_spectrograms):
         return None
