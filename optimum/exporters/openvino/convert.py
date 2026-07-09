@@ -709,9 +709,7 @@ def export_from_model(
         )
 
     if library_name == "diffusers":
-        export_config, models_and_export_configs = get_diffusion_models_for_export_ext(
-            model, exporter="openvino", task=task
-        )
+        export_config, models_and_export_configs = get_diffusion_models_for_export_ext(model, exporter="openvino")
         stateful_submodels = False
     elif stateful and is_encoder_decoder and not custom_architecture:
         export_config, models_and_export_configs = _get_encoder_decoder_stateful_models_for_export(
@@ -1070,7 +1068,6 @@ def get_diffusion_models_for_export_ext(
     int_dtype: str = "int64",
     float_dtype: str = "fp32",
     exporter: str = "openvino",
-    task: Optional[str] = None,
 ):
     is_sdxl = pipeline.__class__.__name__.startswith("StableDiffusionXL")
     is_sd3 = pipeline.__class__.__name__.startswith("StableDiffusion3")

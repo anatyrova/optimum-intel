@@ -873,8 +873,9 @@ class LTX2VaeDummyInputGenerator(DummyVisionInputGenerator):
         normalized_config: NormalizedVisionConfig,
         batch_size: int = DEFAULT_DUMMY_SHAPES["batch_size"],
         num_channels: int = DEFAULT_DUMMY_SHAPES["num_channels"],
-        width: int = DEFAULT_DUMMY_SHAPES["width"],
-        height: int = DEFAULT_DUMMY_SHAPES["height"],
+        # Small spatial dims to speed up tracing; the exported model uses dynamic shapes at runtime.
+        width: int = 16,
+        height: int = 8,
         num_frames: int = 1,
         **kwargs,
     ):
@@ -913,6 +914,7 @@ class LTX2TransformerDummyInputGenerator(DummyVisionInputGenerator):
         normalized_config: NormalizedVisionConfig,
         batch_size: int = DEFAULT_DUMMY_SHAPES["batch_size"],
         num_channels: int = DEFAULT_DUMMY_SHAPES["num_channels"],
+        # Small spatial/temporal dims to speed up tracing; the exported model uses dynamic shapes at runtime.
         width: int = 16,
         height: int = 8,
         num_frames: int = 2,
@@ -1002,6 +1004,7 @@ class LTX2AudioVaeDecoderDummyInputGenerator(DummyVisionInputGenerator):
         task: str,
         normalized_config: NormalizedVisionConfig,
         batch_size: int = DEFAULT_DUMMY_SHAPES["batch_size"],
+        # Small dims to speed up tracing; the exported model uses dynamic shapes at runtime.
         num_channels: int = 8,
         num_frames: int = 2,
         mel_bins: int = 16,
@@ -1026,6 +1029,7 @@ class LTX2VocoderDummyInputGenerator(DummyVisionInputGenerator):
         task: str,
         normalized_config: NormalizedVisionConfig,
         batch_size: int = DEFAULT_DUMMY_SHAPES["batch_size"],
+        # Small dims to speed up tracing; the exported model uses dynamic shapes at runtime.
         num_channels: int = 2,
         num_frames: int = 8,
         mel_bins: int = 64,
