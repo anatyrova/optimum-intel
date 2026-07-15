@@ -10097,12 +10097,13 @@ class _LTX2AttnProcessorWithEps:
 
         if attention_mask is not None:
             attn_weights = attn_weights + attention_mask
-
-        attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
-
+        
         # epsilon to avoid CPU plugin issue with zero attention weights
         eps = 1e-30
-        hidden_states = torch.matmul(attn_weights + eps, value)
+
+        attn_weights = torch.nn.functional.softmax(attn_weights + eps, dim=-1) # COMPARE
+
+        hidden_states = torch.matmul(attn_weights, value)
 
         hidden_states = hidden_states.transpose(1, 2).flatten(2, 3)
         hidden_states = hidden_states.to(query.dtype)

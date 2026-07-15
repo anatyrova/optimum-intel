@@ -91,11 +91,10 @@ if is_diffusers_version(">=", "0.32"):
 else:
     LTXPipeline = object
 
-try:
+if is_diffusers_version(">=", "0.38.0"):
     from diffusers import LTX2Pipeline
-except ImportError:
+else:
     LTX2Pipeline = object
-
 
 if is_diffusers_version(">=", "0.29.0"):
     from diffusers import StableDiffusion3Img2ImgPipeline, StableDiffusion3Pipeline
@@ -139,6 +138,9 @@ else:
 
 DIFFUSION_MODEL_TRANSFORMER_SUBFOLDER = "transformer"
 DIFFUSION_MODEL_TEXT_ENCODER_3_SUBFOLDER = "text_encoder_3"
+DIFFUSION_MODEL_CONNECTORS_SUBFOLDER = "connectors"
+DIFFUSION_MODEL_AUDIO_VAE_DECODER_SUBFOLDER = "audio_vae_decoder"
+DIFFUSION_MODEL_VOCODER_SUBFOLDER = "vocoder"
 
 core = Core()
 
@@ -163,6 +165,9 @@ class OVDiffusionPipeline(OVBaseModel, DiffusionPipeline):
             "text_encoder": os.path.join(DIFFUSION_MODEL_TEXT_ENCODER_SUBFOLDER, OV_XML_FILE_NAME),
             "text_encoder_2": os.path.join(DIFFUSION_MODEL_TEXT_ENCODER_2_SUBFOLDER, OV_XML_FILE_NAME),
             "text_encoder_3": os.path.join(DIFFUSION_MODEL_TEXT_ENCODER_3_SUBFOLDER, OV_XML_FILE_NAME),
+            "connectors": os.path.join(DIFFUSION_MODEL_CONNECTORS_SUBFOLDER, OV_XML_FILE_NAME),
+            "audio_vae_decoder": os.path.join(DIFFUSION_MODEL_AUDIO_VAE_DECODER_SUBFOLDER, OV_XML_FILE_NAME),
+            "vocoder": os.path.join(DIFFUSION_MODEL_VOCODER_SUBFOLDER, OV_XML_FILE_NAME),
         }
         return models_paths
 
@@ -177,6 +182,10 @@ class OVDiffusionPipeline(OVBaseModel, DiffusionPipeline):
         text_encoder_2: Optional[openvino.Model] = None,
         text_encoder_3: Optional[openvino.Model] = None,
         transformer: Optional[openvino.Model] = None,
+        # LTX2-specific optional models
+        connectors: Optional[openvino.Model] = None,
+        audio_vae_decoder: Optional[openvino.Model] = None,
+        vocoder: Optional[openvino.Model] = None,
         # optional pipeline submodels
         tokenizer: Optional[CLIPTokenizer] = None,
         tokenizer_2: Optional[CLIPTokenizer] = None,
@@ -409,6 +418,9 @@ class OVDiffusionPipeline(OVBaseModel, DiffusionPipeline):
         text_encoder_2_file_name: Optional[str] = None,
         text_encoder_3_file_name: Optional[str] = None,
         transformer_file_name: Optional[str] = None,
+        connectors_file_name: Optional[str] = None,
+        audio_vae_decoder_file_name: Optional[str] = None,
+        vocoder_file_name: Optional[str] = None,
         from_onnx: bool = False,
         load_in_8bit: bool = False,
         quantization_config: Union[OVWeightQuantizationConfig, Dict] = None,
@@ -434,6 +446,9 @@ class OVDiffusionPipeline(OVBaseModel, DiffusionPipeline):
             "text_encoder_2": text_encoder_2_file_name or default_file_name,
             "text_encoder_3": text_encoder_3_file_name or default_file_name,
             "transformer": transformer_file_name or default_file_name,
+            "connectors": connectors_file_name or default_file_name,
+            "audio_vae_decoder": audio_vae_decoder_file_name or default_file_name,
+            "vocoder": vocoder_file_name or default_file_name,
         }
 
         if not os.path.isdir(str(model_id)):
@@ -1471,6 +1486,56 @@ class OVModelVaeEncoder(OVPipelinePart):
         return ModelOutput(**model_outputs)
 
 
+class OVModelAudioVaeDecoder(OVPipelinePart):
+    """OV wrapper for LTX2 audio VAE decoder (mel spectrogram decoder).
+
+    Provides the interface expected by LTX2Pipeline including latents_mean/std for normalization.
+    """
+
+    def __init__(self, *args, latents_mean=None, latents_std=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.latents_mean = latents_mean
+        self.latents_std = latents_std
+        self.mel_compression_ratio = getattr(self.config, "mel_compression_ratio", 4) if hasattr(self, "config") else 4
+        self.temporal_compression_ratio = (
+            getattr(self.config, "temporal_compression_ratio", 4) if hasattr(self, "config") else 4
+        )
+
+    def forward(self, latent_sample, return_dict=False):
+        self.compile()
+        model_inputs = {"latent_sample": latent_sample}
+        ov_outputs = self.request(model_inputs, share_inputs=True).to_dict()
+        outputs = {}
+        for key, value in ov_outputs.items():
+            outputs[next(iter(key.names))] = torch.from_numpy(value)
+        if return_dict:
+            return outputs
+        return (outputs.get("sample", next(iter(outputs.values()))),)
+
+    def decode(self, z, return_dict=False):
+        result = self.forward(latent_sample=z, return_dict=False)
+        if return_dict:
+            return {"sample": result[0]}
+        return result
+
+
+class OVModelVocoder(OVPipelinePart):
+    """OV wrapper for LTX2 vocoder (mel spectrogram to waveform)."""
+
+    def forward(self, hidden_states):
+        self.compile()
+        model_inputs = {"hidden_states": hidden_states}
+        ov_outputs = self.request(model_inputs, share_inputs=True).to_dict()
+        outputs = {}
+        for key, value in ov_outputs.items():
+            outputs[next(iter(key.names))] = torch.from_numpy(value)
+        return outputs.get("sample", next(iter(outputs.values())))
+
+    def __call__(self, mel_spectrograms):
+        return self.forward(mel_spectrograms)
+
+
+
 class OVModelVaeDecoder(OVPipelinePart):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -1826,157 +1891,10 @@ class OVLTXPipeline(OVDiffusionPipeline, OVTextualInversionLoaderMixin, LTXPipel
     auto_model_class = LTXPipeline
 
 
-DIFFUSION_MODEL_CONNECTORS_SUBFOLDER = "connectors"
-DIFFUSION_MODEL_AUDIO_VAE_DECODER_SUBFOLDER = "audio_vae_decoder"
-DIFFUSION_MODEL_VOCODER_SUBFOLDER = "vocoder"
-
-
-class OVModelAudioVaeDecoder(OVPipelinePart):
-    """OV wrapper for LTX2 audio VAE decoder (mel spectrogram decoder)."""
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.mel_compression_ratio = getattr(self.config, "mel_compression_ratio", 4) if hasattr(self, "config") else 4
-        self.temporal_compression_ratio = (
-            getattr(self.config, "temporal_compression_ratio", 4) if hasattr(self, "config") else 4
-        )
-
-    def forward(self, latent_sample, return_dict=False):
-        self.compile()
-        model_inputs = {"latent_sample": latent_sample}
-        ov_outputs = self.request(model_inputs, share_inputs=True).to_dict()
-        outputs = {}
-        for key, value in ov_outputs.items():
-            outputs[next(iter(key.names))] = torch.from_numpy(value)
-        if return_dict:
-            return outputs
-        return (outputs.get("sample", next(iter(outputs.values()))),)
-
-    def decode(self, z, return_dict=False):
-        result = self.forward(latent_sample=z, return_dict=False)
-        if return_dict:
-            return {"sample": result[0]}
-        return result
-
-
-class OVModelVocoder(OVPipelinePart):
-    """OV wrapper for LTX2 vocoder (mel spectrogram to waveform)."""
-
-    def forward(self, hidden_states):
-        self.compile()
-        model_inputs = {"hidden_states": hidden_states}
-        ov_outputs = self.request(model_inputs, share_inputs=True).to_dict()
-        outputs = {}
-        for key, value in ov_outputs.items():
-            outputs[next(iter(key.names))] = torch.from_numpy(value)
-        return outputs.get("sample", next(iter(outputs.values())))
-
-    def __call__(self, mel_spectrograms):
-        return self.forward(mel_spectrograms)
-
-
-class _DummyAudioVae:
-    """Compatibility shim for the generic OVDiffusionPipeline dispatch path that doesn't load LTX2-specific components."""
-
-    def __init__(self, latents_mean=None, latents_std=None):
-        self.dtype = torch.float32
-        self.mel_compression_ratio = 4
-        self.temporal_compression_ratio = 4
-
-        class _Cfg:
-            sample_rate = 16000
-            mel_hop_length = 160
-            mel_bins = 64
-            latent_channels = 8
-
-        self.config = _Cfg()
-
-        packed_dim = self.config.latent_channels * (self.config.mel_bins // self.mel_compression_ratio)
-        if latents_mean is not None and latents_mean.numel() == packed_dim:
-            self.latents_mean = latents_mean
-        else:
-            self.latents_mean = torch.zeros(packed_dim)
-        if latents_std is not None and latents_std.numel() == packed_dim:
-            self.latents_std = latents_std
-        else:
-            self.latents_std = torch.ones(packed_dim)
-
-    def decode(self, latents, return_dict=False):
-        return (torch.zeros(1),)
-
-
-class _DummyVocoder:
-    """Compatibility shim for the generic OVDiffusionPipeline dispatch path that doesn't load LTX2-specific components."""
-
-    def __call__(self, mel_spectrograms):
-        return None
-
-
-class _OVAudioVaeWrapper:
-    """Wrapper that adapts OVModelAudioVaeDecoder to the interface expected by LTX2Pipeline.
-
-    LTX2Pipeline expects audio_vae to have:
-    - latents_mean, latents_std attributes
-    - dtype attribute
-    - mel_compression_ratio, temporal_compression_ratio attributes
-    - config with sample_rate, mel_hop_length, mel_bins, latent_channels
-    - decode(z, return_dict=False) method
-    """
-
-    def __init__(self, ov_model, latents_mean=None, latents_std=None):
-        self.ov_model = ov_model
-        self.latents_mean = latents_mean
-        self.latents_std = latents_std
-        self.dtype = torch.float32
-        self.mel_compression_ratio = 4
-        self.temporal_compression_ratio = 4
-
-        class _Cfg:
-            sample_rate = 16000
-            mel_hop_length = 160
-            mel_bins = 64
-            latent_channels = 8
-
-        self.config = _Cfg()
-        # Override from OV model config if available
-        if hasattr(ov_model, "config"):
-            for attr in ["sample_rate", "mel_hop_length", "mel_bins", "latent_channels"]:
-                if hasattr(ov_model.config, attr):
-                    setattr(self.config, attr, getattr(ov_model.config, attr))
-
-    def decode(self, z, return_dict=False):
-        result = self.ov_model.decode(z, return_dict=False)
-        if return_dict:
-            return {"sample": result[0]}
-        return result
-
-
 class OVLTX2Pipeline(OVDiffusionPipeline, OVTextualInversionLoaderMixin, LTX2Pipeline):
     main_input_name = "prompt"
     export_feature = "text-to-video"
     auto_model_class = LTX2Pipeline
-
-    @classproperty
-    def _all_ov_model_paths(cls) -> Dict[str, str]:
-        models_paths = {
-            "transformer": os.path.join(DIFFUSION_MODEL_TRANSFORMER_SUBFOLDER, OV_XML_FILE_NAME),
-            "vae_decoder": os.path.join(DIFFUSION_MODEL_VAE_DECODER_SUBFOLDER, OV_XML_FILE_NAME),
-            "text_encoder": os.path.join(DIFFUSION_MODEL_TEXT_ENCODER_SUBFOLDER, OV_XML_FILE_NAME),
-            "connectors": os.path.join(DIFFUSION_MODEL_CONNECTORS_SUBFOLDER, OV_XML_FILE_NAME),
-            "audio_vae_decoder": os.path.join(DIFFUSION_MODEL_AUDIO_VAE_DECODER_SUBFOLDER, OV_XML_FILE_NAME),
-            "vocoder": os.path.join(DIFFUSION_MODEL_VOCODER_SUBFOLDER, OV_XML_FILE_NAME),
-        }
-        return models_paths
-
-    @property
-    def _ov_model_names(self) -> List[str]:
-        """Return list of OV submodel names for quantization."""
-        return list(self._all_ov_model_paths.keys())
-
-    @property
-    def ov_models(self) -> Dict[str, Union[openvino.Model, openvino.CompiledModel]]:
-        """Return dict mapping submodel names to their OV models for quantization."""
-        return {name: component.model for name, component in self.components.items()}
 
     def __init__(
         self,
@@ -2077,68 +1995,46 @@ class OVLTX2Pipeline(OVDiffusionPipeline, OVTextualInversionLoaderMixin, LTX2Pip
         self.scheduler = scheduler
         self.tokenizer = tokenizer
 
-        # Use real OV audio_vae decoder if available, otherwise use dummy
-        # Guard: when dispatched from OVDiffusionPipeline, config values (lists) may be passed instead of OV models
-        if not isinstance(audio_vae_decoder, openvino.Model):
-            audio_vae_decoder = None
-        if audio_vae_decoder is not None:
-            self.audio_vae_ov = OVModelAudioVaeDecoder(
-                audio_vae_decoder, self, DIFFUSION_MODEL_AUDIO_VAE_DECODER_SUBFOLDER
-            )
-            # Build a wrapper that has the same interface as AutoencoderKLLTX2Audio
-            # but delegates decode() to the OV model
-            vae_cfg = self.vae_decoder.config
-            _audio_mean = getattr(vae_cfg, "audio_latents_mean_data", None)
-            _audio_std = getattr(vae_cfg, "audio_latents_std_data", None)
-            # Also check audio_vae_decoder's own config for latents_mean/std
-            audio_vae_cfg = self.audio_vae_ov.config
-            if _audio_mean is None:
-                _audio_mean = getattr(audio_vae_cfg, "latents_mean_data", None)
-            if _audio_std is None:
-                _audio_std = getattr(audio_vae_cfg, "latents_std_data", None)
-            ov_audio_vae = _OVAudioVaeWrapper(
-                ov_model=self.audio_vae_ov,
-                latents_mean=torch.tensor(_audio_mean) if _audio_mean is not None else None,
-                latents_std=torch.tensor(_audio_std) if _audio_std is not None else None,
-            )
-        else:
-            self.audio_vae_ov = None
-            vae_cfg = self.vae_decoder.config
-            _audio_mean = getattr(vae_cfg, "audio_latents_mean_data", None)
-            _audio_std = getattr(vae_cfg, "audio_latents_std_data", None)
-            ov_audio_vae = _DummyAudioVae(
-                latents_mean=torch.tensor(_audio_mean) if _audio_mean is not None else None,
-                latents_std=torch.tensor(_audio_std) if _audio_std is not None else None,
-            )
+        # Get latents_mean/std from vae_decoder config or audio_vae_decoder config
+        vae_cfg = self.vae_decoder.config
+        _audio_mean = getattr(vae_cfg, "audio_latents_mean_data", None)
+        _audio_std = getattr(vae_cfg, "audio_latents_std_data", None)
 
-        # Use real OV vocoder if available, otherwise use dummy
-        if not isinstance(vocoder, openvino.Model):
-            vocoder = None
-        if vocoder is not None:
-            self.vocoder_ov = OVModelVocoder(vocoder, self, DIFFUSION_MODEL_VOCODER_SUBFOLDER)
-            ov_vocoder = self.vocoder_ov
-        else:
-            self.vocoder_ov = None
-            ov_vocoder = _DummyVocoder()
+        # Create audio_vae_decoder with latents_mean/std for normalization
+        self.audio_vae_ov = OVModelAudioVaeDecoder(
+            audio_vae_decoder,
+            self,
+            DIFFUSION_MODEL_AUDIO_VAE_DECODER_SUBFOLDER,
+            latents_mean=torch.tensor(_audio_mean) if _audio_mean is not None else None,
+            latents_std=torch.tensor(_audio_std) if _audio_std is not None else None,
+        )
+        # Override from audio_vae_decoder's own config if main config didn't have them
+        if _audio_mean is None:
+            _audio_mean = getattr(self.audio_vae_ov.config, "latents_mean_data", None)
+            if _audio_mean is not None:
+                self.audio_vae_ov.latents_mean = torch.tensor(_audio_mean)
+        if _audio_std is None:
+            _audio_std = getattr(self.audio_vae_ov.config, "latents_std_data", None)
+            if _audio_std is not None:
+                self.audio_vae_ov.latents_std = torch.tensor(_audio_std)
+
+        self.vocoder_ov = OVModelVocoder(vocoder, self, DIFFUSION_MODEL_VOCODER_SUBFOLDER)
 
         # Initialize LTX2Pipeline with the OV components
         diffusers_pipeline_args = {
             "scheduler": self.scheduler,
             "vae": self.vae,
-            "audio_vae": ov_audio_vae,
+            "audio_vae": self.audio_vae_ov,
             "text_encoder": self.text_encoder,
             "tokenizer": self.tokenizer,
             "connectors": self.connectors,
             "transformer": self.transformer,
-            "vocoder": ov_vocoder,
+            "vocoder": self.vocoder_ov,
         }
         LTX2Pipeline.__init__(self, **diffusers_pipeline_args)
 
-        # Set attributes that OVDiffusionPipeline.reshape() checks but LTX2 doesn't have
+        # This must exist because properties like batch_size check them
         self.unet = None
-        self.text_encoder_2 = None
-        self.text_encoder_3 = None
-        self.tokenizer_2 = None
 
         self._openvino_config = None
         if quantization_config:
@@ -2175,19 +2071,6 @@ class OVLTX2Pipeline(OVDiffusionPipeline, OVTextualInversionLoaderMixin, LTX2Pip
         if self.vocoder_ov is not None:
             comp["vocoder"] = self.vocoder_ov
         return comp
-
-    @property
-    def _ov_components(self):
-        """Return list of OVPipelinePart components that are loaded."""
-        return [c for c in self.components.values() if c is not None]
-
-    def clear_requests(self):
-        for component in self._ov_components:
-            component.clear_requests()
-
-    def compile(self):
-        for component in self._ov_components:
-            component.compile()
 
     def _reshape_transformer(
         self, model, batch_size, height, width, num_images_per_prompt=-1, tokenizer_max_length=-1, num_frames=-1
@@ -2242,116 +2125,6 @@ class OVLTX2Pipeline(OVDiffusionPipeline, OVTextualInversionLoaderMixin, LTX2Pip
                         shapes[inputs][i] = -1
                 ov_model_attr.model.reshape(shapes)
         self.clear_requests()
-
-    @classmethod
-    def _from_pretrained(
-        cls,
-        model_id: Union[str, Path],
-        config: Dict[str, Any],
-        token: Optional[Union[bool, str]] = None,
-        revision: Optional[str] = None,
-        force_download: bool = False,
-        local_files_only: bool = False,
-        cache_dir: str = HUGGINGFACE_HUB_CACHE,
-        transformer_file_name: Optional[str] = None,
-        vae_decoder_file_name: Optional[str] = None,
-        text_encoder_file_name: Optional[str] = None,
-        connectors_file_name: Optional[str] = None,
-        audio_vae_decoder_file_name: Optional[str] = None,
-        vocoder_file_name: Optional[str] = None,
-        from_onnx: bool = False,
-        load_in_8bit: bool = False,
-        quantization_config: Union[OVWeightQuantizationConfig, Dict] = None,
-        model_save_dir: Optional[Union[str, Path, TemporaryDirectory]] = None,
-        trust_remote_code: bool = False,
-        export_model_id: Optional[str] = None,
-        **kwargs,
-    ):
-        default_file_name = ONNX_WEIGHTS_NAME if from_onnx else OV_XML_FILE_NAME
-
-        file_names = {
-            "transformer": transformer_file_name or default_file_name,
-            "vae_decoder": vae_decoder_file_name or default_file_name,
-            "text_encoder": text_encoder_file_name or default_file_name,
-            "connectors": connectors_file_name or default_file_name,
-            "audio_vae_decoder": audio_vae_decoder_file_name or default_file_name,
-            "vocoder": vocoder_file_name or default_file_name,
-        }
-
-        if not os.path.isdir(str(model_id)):
-            all_components = {key for key in config.keys() if not key.startswith("_")} | {"vae_decoder"}
-            allow_patterns = {os.path.join(component, "*") for component in all_components}
-            allow_patterns.update(
-                {
-                    *file_names.values(),
-                    *(file_name.replace(".xml", ".bin") for file_name in file_names.values()),
-                    SCHEDULER_CONFIG_NAME,
-                    cls.config_name,
-                    CONFIG_NAME,
-                }
-            )
-            ignore_patterns = ["*.msgpack", "*.safetensors", "*pytorch_model.bin"]
-            if not from_onnx:
-                ignore_patterns.extend(["*.onnx", "*.onnx_data"])
-
-            model_save_folder = snapshot_download(
-                model_id,
-                cache_dir=cache_dir,
-                force_download=force_download,
-                local_files_only=local_files_only,
-                revision=revision,
-                token=token,
-                user_agent=http_user_agent,
-                allow_patterns=allow_patterns,
-                ignore_patterns=ignore_patterns,
-            )
-        else:
-            model_save_folder = str(model_id)
-
-        model_save_path = Path(model_save_folder)
-        if model_save_dir is None:
-            model_save_dir = model_save_path
-
-        # Load scheduler and tokenizer
-        submodels = {"scheduler": None, "tokenizer": None}
-        for name in submodels.keys():
-            if name in kwargs:
-                submodels[name] = kwargs.pop(name)
-            elif config.get(name, (None, None))[0] is not None:
-                module_name, module_class = config.get(name)
-                if hasattr(pipelines, module_name):
-                    module = getattr(pipelines, module_name)
-                else:
-                    module = importlib.import_module(module_name)
-                class_obj = getattr(module, module_class)
-                load_method = getattr(class_obj, "from_pretrained")
-                if (model_save_path / name).is_dir():
-                    submodels[name] = load_method(model_save_path / name)
-                else:
-                    submodels[name] = load_method(model_save_path)
-
-        # Load OV models
-        models = {
-            ov_model_name: (model_save_path / ov_model_path).parent / file_names[ov_model_name]
-            for ov_model_name, ov_model_path in cls._all_ov_model_paths.items()
-        }
-
-        for name, path in models.items():
-            if path.is_file():
-                models[name] = cls.load_model(path)
-            else:
-                models[name] = None
-
-        if quantization_config is not None and not isinstance(quantization_config, OVWeightQuantizationConfig):
-            quantization_config = OVWeightQuantizationConfig.from_dict(quantization_config)
-
-        return cls(
-            **models,
-            **submodels,
-            model_save_dir=model_save_dir,
-            quantization_config=quantization_config,
-            **kwargs,
-        )
 
 
 SUPPORTED_OV_PIPELINES = [
