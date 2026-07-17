@@ -868,9 +868,11 @@ class OVDiffusionPipeline(OVBaseModel, DiffusionPipeline):
                 )
                 self.is_dynamic = True
         shapes = {
-            model.inputs[0]: [batch_size, in_channels, height, width]
-            if model.inputs[0].get_partial_shape().rank.get_length() == 4
-            else [batch_size, in_channels, num_frames, height, width]
+            model.inputs[0]: (
+                [batch_size, in_channels, height, width]
+                if model.inputs[0].get_partial_shape().rank.get_length() == 4
+                else [batch_size, in_channels, num_frames, height, width]
+            )
         }
         model.reshape(shapes)
         return model
@@ -899,9 +901,11 @@ class OVDiffusionPipeline(OVBaseModel, DiffusionPipeline):
                 )
                 self.is_dynamic = True
         shapes = {
-            model.inputs[0]: [num_images_per_prompt, latent_channels, height, width]
-            if not is_ltx
-            else [num_images_per_prompt, latent_channels, num_frames, height, width]
+            model.inputs[0]: (
+                [num_images_per_prompt, latent_channels, height, width]
+                if not is_ltx
+                else [num_images_per_prompt, latent_channels, num_frames, height, width]
+            )
         }
         model.reshape(shapes)
         return model
@@ -1533,7 +1537,6 @@ class OVModelVocoder(OVPipelinePart):
 
     def __call__(self, mel_spectrograms):
         return self.forward(mel_spectrograms)
-
 
 
 class OVModelVaeDecoder(OVPipelinePart):

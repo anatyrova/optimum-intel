@@ -10097,11 +10097,11 @@ class _LTX2AttnProcessorWithEps:
 
         if attention_mask is not None:
             attn_weights = attn_weights + attention_mask
-        
+
         # epsilon to avoid CPU plugin issue with zero attention weights
         eps = 1e-30
 
-        attn_weights = torch.nn.functional.softmax(attn_weights + eps, dim=-1) # COMPARE
+        attn_weights = torch.nn.functional.softmax(attn_weights + eps, dim=-1)  # COMPARE
 
         hidden_states = torch.matmul(attn_weights, value)
 
@@ -10371,8 +10371,8 @@ class LTX2TransformerPatcher(ModelPatcher):
         for name, module in self._model.named_modules():
             if name in self._orig_processors and hasattr(module, "set_processor"):
                 module.set_processor(self._orig_processors[name])
-                
-                
+
+
 # Adopted from qwen3_moe_forward_patched above, extended with shared expert computation.
 # https://github.com/huggingface/transformers/blob/v4.57.0/src/transformers/models/qwen3_omni_moe/modeling_qwen3_omni_moe.py#L2696
 def qwen3_omni_moe_talker_sparse_forward_patched(self, hidden_states: torch.Tensor) -> torch.Tensor:
