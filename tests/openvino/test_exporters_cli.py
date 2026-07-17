@@ -46,7 +46,6 @@ from optimum.intel import (  # noqa
     OVFluxFillPipeline,
     OVFluxPipeline,
     OVLatentConsistencyModelPipeline,
-    OVLTX2Pipeline,
     OVLTXPipeline,
     OVModelForAudioClassification,
     OVModelForCausalLM,
@@ -113,6 +112,7 @@ class OVCLIExportTestCase(unittest.TestCase):
         ("inpainting", "flux-fill"),
         ("text-to-image", "sana"),
         ("text-to-video", "ltx-video"),
+        ("text-to-video", "ltx2"),
         ("feature-extraction", "sam"),
         ("text-to-audio", "speecht5"),
         ("zero-shot-image-classification", "clip"),
@@ -143,106 +143,6 @@ class OVCLIExportTestCase(unittest.TestCase):
         if TEST_NAME_TO_MODEL_TYPE.get(model_type, model_type)
         in get_supported_model_for_library("transformers") | get_supported_model_for_library("diffusers")
     ]
-
-    if is_diffusers_version(">=", "0.37.0"):
-        SUPPORTED_ARCHITECTURES.extend(
-            [
-                ("text-to-image", "flux.2-klein"),
-            ]
-        )
-
-    if is_diffusers_version(">=", "0.38.0"):
-        SUPPORTED_ARCHITECTURES.extend(
-            [
-                ("text-to-video", "ltx2"),
-            ]
-        )
-
-    if is_transformers_version(">=", "4.48.0"):
-        SUPPORTED_ARCHITECTURES.extend(
-            [
-                ("text-generation-with-past", "cohere2"),
-            ]
-        )
-
-    if is_transformers_version(">=", "4.57"):
-        SUPPORTED_ARCHITECTURES.extend(
-            [
-                ("feature-extraction", "qwen3_vl_embedding"),
-            ]
-        )
-
-    if is_transformers_version(">=", "4.54.0"):
-        SUPPORTED_ARCHITECTURES.extend(
-            [
-                ("text-generation", "lfm2"),
-                ("text-generation-with-past", "lfm2"),
-            ]
-        )
-
-    if is_transformers_version(">=", "4.54") and is_transformers_version("<", "5"):
-        SUPPORTED_ARCHITECTURES.extend(
-            [
-                ("text-generation-with-past", "qwen3_eagle3"),
-            ]
-        )
-
-    if is_transformers_version(">=", "4.49") and is_transformers_version("<", "5"):
-        SUPPORTED_ARCHITECTURES.extend(
-            [
-                ("text-generation-with-past", "zamba2"),
-            ]
-        )
-
-    if is_transformers_version(">=", "4.54") and is_transformers_version("<", "5"):
-        SUPPORTED_ARCHITECTURES.extend(
-            [
-                ("text-generation-with-past", "exaone4"),
-            ]
-        )
-    if is_transformers_version(">=", "4.52.1") and is_transformers_version("<", "5"):
-        SUPPORTED_ARCHITECTURES.extend(
-            [
-                ("text-generation-with-past", "bitnet"),
-            ]
-        )
-
-    if is_transformers_version(">=", "4.53.0"):
-        SUPPORTED_ARCHITECTURES.extend(
-            [
-                ("text-generation-with-past", "granitemoehybrid"),
-                ("text-generation-with-past", "smollm3"),
-            ]
-        )
-
-    if is_transformers_version(">=", "4.57.0"):
-        SUPPORTED_ARCHITECTURES.extend(
-            [
-                ("text-generation-with-past", "hunyuan_v1_dense"),
-            ]
-        )
-
-    if is_transformers_version(">=", "4.57") and is_transformers_version("<", "5.0.0"):
-        SUPPORTED_ARCHITECTURES.extend(
-            [
-                ("image-text-to-text", "qwen3_vl_eagle3"),
-            ]
-        )
-
-    if is_transformers_version(">=", "4.57.0") and is_transformers_version("<", "5"):
-        SUPPORTED_ARCHITECTURES.extend(
-            [
-                ("text-generation-with-past", "qwen3_next"),
-            ]
-        )
-
-    if is_transformers_version(">=", "5.0"):
-        SUPPORTED_ARCHITECTURES.extend(
-            [
-                ("text-generation", "lfm2_moe"),
-                ("text-generation-with-past", "lfm2_moe"),
-            ]
-        )
 
     EXPECTED_NUMBER_OF_TOKENIZER_MODELS = {
         "gpt2": 2,

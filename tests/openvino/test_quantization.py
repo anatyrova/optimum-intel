@@ -1077,9 +1077,9 @@ class OVWeightCompressionTest(unittest.TestCase):
                 num_samples=1,
             ),
             {
-                "lm_model": (
-                    {"int8": 50, "int4": 52} if is_transformers_version(">=", "4.57") else {"int8": 46, "int4": 56}
-                ),
+                "lm_model": {"int8": 50, "int4": 52}
+                if is_transformers_version(">=", "4.57")
+                else {"int8": 46, "int4": 56},
                 "text_embeddings_model": {"int8": 1},
                 "vision_embeddings_model": {"int8": 16},
             },
@@ -1784,14 +1784,12 @@ class OVWeightCompressionTest(unittest.TestCase):
         self.assertTrue(all(len(sample["input_ids"][0]) == 64 for sample in dataset["model"].get_data()))
 
     @parameterized.expand(
-        (
-            [
-                ("gemma4",),
-                ("gemma4_moe",),
-            ]
-            if is_transformers_version(">=", "5.5.0")
-            else []
-        ),
+        [
+            ("gemma4",),
+            ("gemma4_moe",),
+        ]
+        if is_transformers_version(">=", "5.5.0")
+        else [],
         skip_on_empty=True,
         name_func=lambda testcase_func, param_num, params: f"{testcase_func.__name__}_{parameterized.to_safe_name(params.args[0])}",
     )
