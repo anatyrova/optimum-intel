@@ -262,6 +262,10 @@ class OVDiffusionPipeline(OVBaseModel, DiffusionPipeline):
             if text_encoder_3 is not None
             else None
         )
+        # LTX2-specific models
+        self.connectors = None
+        self.audio_vae_decoder = None
+        self.vocoder = None
         # We wrap the VAE Decoder & Encoder in a single object to simulate diffusers API
         self.vae = OVModelVae(decoder=self.vae_decoder, encoder=self.vae_encoder)
 
@@ -2004,7 +2008,7 @@ class OVLTX2Pipeline(OVDiffusionPipeline, OVTextualInversionLoaderMixin, LTX2Pip
         _audio_std = getattr(vae_cfg, "audio_latents_std_data", None)
 
         # Create audio_vae_decoder with latents_mean/std for normalization
-        self.audio_vae_ov = OVModelAudioVaeDecoder(
+        audio_vae = OVModelAudioVaeDecoder(
             audio_vae_decoder,
             self,
             DIFFUSION_MODEL_AUDIO_VAE_DECODER_SUBFOLDER,
@@ -2013,26 +2017,27 @@ class OVLTX2Pipeline(OVDiffusionPipeline, OVTextualInversionLoaderMixin, LTX2Pip
         )
         # Override from audio_vae_decoder's own config if main config didn't have them
         if _audio_mean is None:
-            _audio_mean = getattr(self.audio_vae_ov.config, "latents_mean_data", None)
+            _audio_mean = getattr(audio_vae.config, "latents_mean_data", None)
             if _audio_mean is not None:
-                self.audio_vae_ov.latents_mean = torch.tensor(_audio_mean)
+                audio_vae.latents_mean = torch.tensor(_audio_mean)
         if _audio_std is None:
-            _audio_std = getattr(self.audio_vae_ov.config, "latents_std_data", None)
+            _audio_std = getattr(audio_vae.config, "latents_std_data", None)
             if _audio_std is not None:
-                self.audio_vae_ov.latents_std = torch.tensor(_audio_std)
+                audio_vae.latents_std = torch.tensor(_audio_std)
 
-        self.vocoder_ov = OVModelVocoder(vocoder, self, DIFFUSION_MODEL_VOCODER_SUBFOLDER)
+        vocoder = OVModelVocoder(vocoder, self, DIFFUSION_MODEL_VOCODER_SUBFOLDER)
 
-        # Initialize LTX2Pipeline with the OV components
+        # Register the OV submodels via diffusers' pipeline init; this sets self.audio_vae,
+        # self.vocoder, self.connectors, self.transformer, ... and registers them in self.config.
         diffusers_pipeline_args = {
             "scheduler": self.scheduler,
             "vae": self.vae,
-            "audio_vae": self.audio_vae_ov,
+            "audio_vae": audio_vae,
             "text_encoder": self.text_encoder,
             "tokenizer": self.tokenizer,
             "connectors": self.connectors,
             "transformer": self.transformer,
-            "vocoder": self.vocoder_ov,
+            "vocoder": vocoder,
         }
         LTX2Pipeline.__init__(self, **diffusers_pipeline_args)
 
@@ -2069,10 +2074,10 @@ class OVLTX2Pipeline(OVDiffusionPipeline, OVTextualInversionLoaderMixin, LTX2Pip
             comp["text_encoder"] = self.text_encoder
         if self.connectors is not None:
             comp["connectors"] = self.connectors
-        if self.audio_vae_ov is not None:
-            comp["audio_vae_decoder"] = self.audio_vae_ov
-        if self.vocoder_ov is not None:
-            comp["vocoder"] = self.vocoder_ov
+        if self.audio_vae is not None:
+            comp["audio_vae_decoder"] = self.audio_vae
+        if self.vocoder is not None:
+            comp["vocoder"] = self.vocoder
         return comp
 
     def _reshape_transformer(
@@ -2116,7 +2121,7 @@ class OVLTX2Pipeline(OVDiffusionPipeline, OVTextualInversionLoaderMixin, LTX2Pip
         effective_batch = (
             batch_size * num_images_per_prompt * 2 if batch_size > 0 and num_images_per_prompt > 0 else -1
         )
-        for ov_model_attr in [self.connectors, self.audio_vae_ov, self.vocoder_ov]:
+        for ov_model_attr in [self.connectors, self.audio_vae, self.vocoder]:
             if ov_model_attr is not None:
                 shapes = {}
                 for inputs in ov_model_attr.model.inputs:
