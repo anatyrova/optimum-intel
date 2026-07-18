@@ -9923,8 +9923,14 @@ class KokoroModelPatcher(ModelPatcher):
 
 def _ltx2_connector_forward_patched(self, hidden_states, attention_mask=None, attn_mask_binarize_threshold=-9000.0):
     """
-    Patched forward for LTX2ConnectorTransformer1d that replaces data-dependent indexing
-    with traceable vectorized operations.
+    Patched forward for LTX2ConnectorTransformer1d.
+
+    Original does boolean-mask indexing `hidden_states[i, mask[i].bool(), :]`, whose output
+    length depends on mask values and cannot be traced. Rewritten with fixed-shape sort +
+    gather + arange mask (valid tokens left, registers right).
+
+    Reference (diffusers==0.38.0): pipelines/ltx2/connectors.py,
+    LTX2ConnectorTransformer1d.forward L279-330 (data-dependent indexing at L304).
     """
     batch_size, seq_len, hidden_dim = hidden_states.shape
 
@@ -9969,8 +9975,12 @@ def _ltx2_connectors_top_level_forward_patched(
     self, text_encoder_hidden_states, attention_mask, padding_side="left", scale_factor=8
 ):
     """
-    Patched top-level forward for LTX2TextConnectors that makes per_layer_masked_mean_norm
-    traceable by avoiding data-dependent indexing.
+    Patched top-level forward for LTX2TextConnectors: inlines per_layer_masked_mean_norm
+    (masked_fill/arange/amin/amax, all fixed-shape) and hardcodes padding_side="left" so the
+    connectors stack traces cleanly as a single graph.
+
+    Reference (diffusers==0.38.0): pipelines/ltx2/connectors.py,
+    LTX2TextConnectors.forward L397-476 and per_layer_masked_mean_norm L14-78.
     """
     import torch
 
@@ -10048,8 +10058,13 @@ def _ltx2_connectors_top_level_forward_patched(
 
 class _LTX2AttnProcessorWithEps:
     """
-    Attention processor that replaces SDPA with manual attention + epsilon
-    to work around OpenVINO CPU plugin numerical issues with zero attention weights.
+    Connector attention processor: replaces SDPA with manual attention and adds eps=1e-30
+    before softmax to avoid an OpenVINO CPU plugin numerical issue with all-zero attention rows.
+
+    Reference (diffusers==0.38.0): models/transformers/transformer_ltx2.py,
+    LTX2AudioVideoAttnProcessor.__call__ L161-228 (SDPA via dispatch_attention_fn at L206).
+
+
     """
 
     def __call__(
@@ -10101,7 +10116,7 @@ class _LTX2AttnProcessorWithEps:
         # epsilon to avoid CPU plugin issue with zero attention weights
         eps = 1e-30
 
-        attn_weights = torch.nn.functional.softmax(attn_weights + eps, dim=-1)  # COMPARE
+        attn_weights = torch.nn.functional.softmax(attn_weights + eps, dim=-1)
 
         hidden_states = torch.matmul(attn_weights, value)
 
@@ -10115,6 +10130,11 @@ class _LTX2AttnProcessorWithEps:
 
 
 class LTX2ConnectorsPatcher(ModelPatcher):
+    """
+    Export patcher for LTX2TextConnectors: swaps in the trace-safe top-level and
+    sub-connector forwards and the eps attention processor for the duration of the export.
+    """
+
     def __enter__(self):
         super().__enter__()
 
@@ -10163,7 +10183,14 @@ class LTX2ConnectorsPatcher(ModelPatcher):
 
 
 def _ltx2_apply_split_rotary_emb(x, freqs):
-    """Patched apply_split_rotary_emb that avoids data-dependent branching."""
+    """
+    Patched apply_split_rotary_emb. Original does in-place `addcmul_` on views of a slice
+    (first_out/second_out), which produces an incorrect/unstable trace. Rewritten with pure
+    out-of-place ops.
+
+    Reference (diffusers==0.38.0): models/transformers/transformer_ltx2.py,
+    apply_split_rotary_emb L46-84 (in-place addcmul_ on views at L75-76).
+    """
     cos, sin = freqs
     x_dtype = x.dtype
 
@@ -10198,10 +10225,12 @@ def _ltx2_apply_split_rotary_emb(x, freqs):
 
 class _LTX2TraceSafeAttnProcessor:
     """
-    Attention processor with trace-safe mask handling and RoPE.
-    Replaces prepare_attention_mask (which has data-dependent branches) and
-    apply_split_rotary_emb (which uses in-place addcmul_ on views) with
-    trace-safe equivalents.
+    Transformer attention processor made trace-safe: replaces `prepare_attention_mask`
+    (data-dependent branches) and SDPA with a fixed-shape mask reshape + manual attention,
+    and uses the out-of-place RoPE above instead of the in-place `addcmul_` original.
+
+    Reference (diffusers==0.38.0): models/transformers/transformer_ltx2.py,
+    LTX2AudioVideoAttnProcessor.__call__ L161-228 (prepare_attention_mask at L175).
     """
 
     def __call__(
@@ -10278,6 +10307,12 @@ class _LTX2TraceSafeAttnProcessor:
 
 
 class LTX2TextEncoderPatcher(ModelPatcher):
+    """
+    Export patcher for the text encoder. Forces output_hidden_states, builds an explicit
+    causal mask (the connectors consume every hidden-state layer), and returns a flat dict so
+    each `hidden_states.{i}` becomes a named export output.
+    """
+
     def __init__(self, config, model, model_kwargs=None):
         model.config.output_hidden_states = True
         super().__init__(config, model, model_kwargs)
@@ -10305,6 +10340,11 @@ class LTX2TextEncoderPatcher(ModelPatcher):
 
 
 class LTX2TransformerPatcher(ModelPatcher):
+    """
+    Export patcher for the LTX2 transformer: installs the trace-safe attention processor and
+    wraps forward to force return_dict=False and emit a named-output dict.
+    """
+
     def __enter__(self):
         super().__enter__()
 
