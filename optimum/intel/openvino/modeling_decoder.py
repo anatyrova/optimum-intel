@@ -1181,9 +1181,30 @@ class OVCacheWithMambaStates(MambaCache):
             layer_types = getattr(config, "layer_types", None)
             self.num_attn_layers = layer_types.count("full_attention")
             self.head_dim = getattr(config, "head_dim", config.hidden_size // config.num_attention_heads)
+        elif config.model_type == "lfm3":
+            # full_attention and sliding_attention layers both keep a full KV cache, conv layers keep a conv state
+            self.num_mamba_layers = config.layer_types.count("conv")
+            self.num_attn_layers = len(config.layer_types) - self.num_mamba_layers
+            self.num_key_value_heads = config.num_key_value_heads
+            self.head_dim = getattr(config, "head_dim", None) or config.hidden_size // config.num_attention_heads
 
         self.conv_states = conv_states
-        if self.conv_states is None:
+        if self.conv_states is None and config.model_type == "lfm3":
+            self.conv_states = [
+                torch.zeros(
+                    (self.max_batch_size, self.hidden_size, self.conv_kernel_size), device=self.device, dtype=dtype
+                )
+                for _ in range(self.num_mamba_layers)
+            ]
+        elif self.conv_states is None and config.model_type == "granitemoehybrid":
+            self.conv_states = []
+            intermediate_size = int(self.mamba_expand * self.hidden_size)
+            conv_dim = intermediate_size + 2 * self.mamba_ngroups * self.ssm_state_size
+            for _ in range(self.num_mamba_layers):
+                conv_state_shape = (self.max_batch_size, conv_dim, self.conv_kernel_size)
+                conv_state: torch.Tensor = torch.zeros(conv_state_shape, device=self.device, dtype=dtype)
+                self.conv_states.append(conv_state)
+        elif self.conv_states is None:
             self.conv_states = []
             for _ in range(self.num_mamba_layers):
                 if (
@@ -1207,7 +1228,20 @@ class OVCacheWithMambaStates(MambaCache):
                 self.conv_states.append(conv_state)
 
         self.ssm_states = ssm_states
-        if self.ssm_states is None:
+        if self.ssm_states is None and config.model_type == "lfm3":
+            self.ssm_states = []
+        elif self.ssm_states is None and config.model_type == "granitemoehybrid":
+            self.ssm_states = []
+            for _ in range(self.num_mamba_layers):
+                ssm_state_shape = (
+                    self.max_batch_size,
+                    self.n_mamba_heads,
+                    self.mamba_headdim,
+                    self.ssm_state_size,
+                )
+                ssm_state: torch.Tensor = torch.zeros(ssm_state_shape, device=self.device, dtype=dtype)
+                self.ssm_states.append(ssm_state)
+        elif self.ssm_states is None:
             self.ssm_states: List[torch.Tensor] = []
             for _ in range(self.num_mamba_layers):
                 if self.n_mamba_heads and self.mamba_headdim:
@@ -1292,6 +1326,17 @@ class OVModelWithMambaForCausalLM(OVModelForCausalLM):
     2. state-space model - ssm_states:  (batch_size, hidden_dim, num_state_features)
     This class supports stateful and stateless inference using OpenVINO.
     """
+
+    # hybrid models whose attention layers need the attention mask of the full context (past + new tokens)
+    _FULL_ATTENTION_MASK_MODEL_TYPES = (
+        "lfm2",
+        "lfm2_moe",
+        "lfm3",
+        "granitemoehybrid",
+        "qwen3_next",
+        "qwen3_5_text",
+        "qwen3_5_moe_text",
+    )
 
     def __init__(
         self,
@@ -1384,8 +1429,12 @@ class OVModelWithMambaForCausalLM(OVModelForCausalLM):
             inputs["cache_position"] = cache_position
         if "attention_mask" in self.input_names:
             if attention_mask is None:
-                # during decoding stage it must be a tensor of ones
-                attention_mask = torch.ones_like(input_ids, dtype=torch.int64)
+                # Mamba blocks only need a mask of ones for the new tokens, while hybrid models with attention layers
+                # expect it to cover the past tokens too (transformers >= 5.20 drops all-ones masks in `generate`)
+                past_length = 0
+                if cache_params is not None and self.config.model_type in self._FULL_ATTENTION_MASK_MODEL_TYPES:
+                    past_length = self._past_length if self.stateful else cache_params.key_cache[0].shape[-2]
+                attention_mask = torch.ones((input_ids.shape[0], past_length + input_ids.shape[1]), dtype=torch.int64)
             inputs["attention_mask"] = attention_mask
 
         if self.stateful and cache_params is None:
@@ -1479,7 +1528,7 @@ class OVModelWithMambaForCausalLM(OVModelForCausalLM):
             elif model_kwargs.get("cache_params") is not None:
                 model_kwargs["cache_position"] = torch.tensor([num_new_tokens], dtype=torch.long)
 
-        if "attention_mask" in model_kwargs:
+        if model_kwargs.get("attention_mask") is not None:
             attention_mask = model_kwargs["attention_mask"]
             model_kwargs["attention_mask"] = torch.cat(
                 [attention_mask, attention_mask.new_ones((attention_mask.shape[0], 1))], dim=-1
@@ -1500,6 +1549,7 @@ class OVModelWithMambaForCausalLM(OVModelForCausalLM):
         # Overwitten -- uses `cache_params` as opposed to `past_key_values`
 
         if self.use_cache:
+            # `cache_position` should have been initialized in `generate`
             if cache_position is None:
                 if is_transformers_version("<", "5.4"):
                     raise ValueError(
@@ -1507,23 +1557,17 @@ class OVModelWithMambaForCausalLM(OVModelForCausalLM):
                         "`model.generate`, you are responsible for passing in a valid `cache_position` if "
                         "you are calling `prepare_inputs_for_generation` directly with `use_cache=True`"
                     )
-                # infer from cache_params: None means prefill (0), otherwise means decoding stage
-                cache_position = torch.tensor(
-                    [0 if cache_params is None else 1], device=input_ids.device, dtype=torch.long
-                )
+                if cache_params is None:
+                    cache_position = torch.arange(0, input_ids.shape[1], device=input_ids.device)
+                else:
+                    cache_position = torch.tensor([self._past_length], device=input_ids.device)
+
             if cache_position[0] > 0:
                 # decoding stage so it takes the last token
                 input_ids = input_ids[:, -1].unsqueeze(-1)
 
-                if self.config.model_type not in [
-                    "lfm2",
-                    "lfm2_moe",
-                    "granitemoehybrid",
-                    "qwen3_next",
-                    "qwen3_5_text",
-                    "qwen3_5_moe_text",
-                ]:
-                    # LFM2, GraniteMoeHybrid (Granite-4.0), and Qwen3-Next require the attention mask
+                if self.config.model_type not in self._FULL_ATTENTION_MASK_MODEL_TYPES:
+                    # LFM2, GraniteMoeHybrid (Granite-4.0) and Qwen3-Next require the attention mask
                     # to be the length of the full context, so default mask from OVModelForCausalLM needs to be used.
                     # Other models like Mamba typically do not require an attention_mask
                     # for the decoding step after the first token so use attention mask of ones.

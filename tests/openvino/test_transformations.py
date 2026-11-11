@@ -27,7 +27,11 @@ from utils_tests import (
     get_supported_model_for_library,
 )
 
-from optimum.intel.utils.import_utils import is_transformers_version
+from optimum.intel.utils.import_utils import (
+    is_diffusers_version,
+    is_qwen_tts_available,
+    is_transformers_version,
+)
 
 
 # Expected transformations per architecture, separated by stage:
@@ -106,7 +110,6 @@ ARCH_TO_EXPECTED_TRANSFORMATIONS = {
         "compile": [
             "ConvertMatMulToFC",
             "ConvertToCPUSpecificOpset",
-            "ConvertToPowerStatic",
             "ConvertToSwishCPU",
             "Snippets",
             "Tokenization",
@@ -156,6 +159,88 @@ ARCH_TO_EXPECTED_TRANSFORMATIONS = {
             "ConvertToSwishCPU",
             "MoveReadValueInputsToSubgraph",
             "MulAddToFMA",
+        ],
+    },
+    # hybrid short conv + full / sliding window attention, sandwich RMSNorm, per-layer-type RoPE
+    "lfm3": {
+        "convert": [
+            "SDPAFusion",
+            "MakeStateful",
+            "TransposeMatMul",
+            "DecompressionHandling",
+        ],
+        "compile": [
+            "RMSFusion",
+            "RoPEFusion",
+            "RoPEFusionGPTNEOX",
+            "RoPEFusionPreprocess",
+            "StatefulSDPAFusion",
+            "SDPASubgraphFusion",
+            "CausalMaskPreprocessFusion",
+            "ConvertBroadcast3",
+            "ConvertMatMulToFC",
+            "ConvertToCPUSpecificOpset",
+            "ConvertToSwishCPU",
+            "Snippets",
+            "Tokenization",
+        ],
+    },
+    # same language model as lfm3, plus the vision encoder (2D RoPE attention, depthwise conv) and projector
+    "lfm3_vl": {
+        "convert": [
+            "SDPAFusion",
+            "MakeStateful",
+            "TransposeMatMul",
+            "CommonFusions",
+            "DecompressionHandling",
+        ],
+        "compile": [
+            "RMSFusion",
+            "RoPEFusion",
+            "RoPEFusionGPTNEOX",
+            "RoPEFusionPreprocess",
+            "StatefulSDPAFusion",
+            "SDPASubgraphFusion",
+            "CausalMaskPreprocessFusion",
+            "BroadcastMatMulFusion",
+            "MultiplyFusions",
+            "FullyConnectedBiasFusion",
+            "ConvertBroadcast3",
+            "ConvertMatMulToFC",
+            "ConvertToCPUSpecificOpset",
+            "ConvertToPowerStatic",
+            "ConvertToSwishCPU",
+            "Snippets",
+            "Tokenization",
+        ],
+    },
+    # the LFM3-VL language model and vision encoder, plus the speech encoder, depth decoder and codec decoder
+    "lfm3_omni": {
+        "convert": [
+            "SDPAFusion",
+            "MakeStateful",
+            "TransposeMatMul",
+            "CommonFusions",
+            "DecompressionHandling",
+        ],
+        "compile": [
+            "RMSFusion",
+            "RoPEFusion",
+            "RoPEFusionGPTNEOX",
+            "RoPEFusionPreprocess",
+            "StatefulSDPAFusion",
+            "SDPASubgraphFusion",
+            "CausalMaskPreprocessFusion",
+            "BroadcastMatMulFusion",
+            "MultiplyFusions",
+            "FullyConnectedBiasFusion",
+            "ConvertBroadcast3",
+            "ConvertMatMulToFC",
+            "ConvertToCPUSpecificOpset",
+            "ConvertToPowerStatic",
+            "ConvertToSwishCPU",
+            "Snippets",
+            "Tokenization",
         ],
     },
     "qwen3_5_moe": {
@@ -239,6 +324,34 @@ ARCH_TO_EXPECTED_TRANSFORMATIONS = {
             "ConvertToPowerStatic",
         ],
     },
+    "qwen3_tts": {
+        # Qwen3-TTS is exported component-wise into stateless graphs, so there is no
+        # MakeStateful/StatefulSDPAFusion here; what is checked is that the talker and code
+        # predictor stacks still get the usual decoder fusions (RoPE, SDPA subgraph, matmul
+        # conversion) and that the compressed embedding tables go through the decompression
+        # path rather than being folded to full precision.
+        "model_class": "OVModelForTextToSpeechSeq2Seq",
+        "convert": [
+            "CommonOptimizations",
+            "CompressedGatherTransformation",
+            "DecompressionHandling",
+            "EnableDecompressionConvertConstantFolding",
+        ],
+        "compile": [
+            "SDPASubgraphFusion",
+            "CommonDecompositions",
+            "RoPEFusion",
+            "RoPEFusionGPTNEOX",
+            "RoPEFusionPreprocess",
+            "CausalMaskPreprocessFusion",
+            "ConvertMatMulToFC",
+            "ConvertToPowerStatic",
+            "ConvertToSwishCPU",
+            "ConvertSoftMax8ToSoftMax1",
+            "ConvertBroadcast3",
+            "ConvertToCPUSpecificOpset",
+        ],
+    },
     "qwen3_omni_moe": {
         "convert": [
             "SDPAFusion",
@@ -263,6 +376,149 @@ ARCH_TO_EXPECTED_TRANSFORMATIONS = {
             "ConvertToSwishCPU",
         ],
     },
+    "muse_glimmer": {
+        "convert": [
+            "SDPAFusion",
+            "SDPAFusionMatcher",
+            "MakeStateful",
+            "TransposeConvert",
+            "CommonFusions",
+            "LinOpSequenceFusion",
+            "ReshapeAMatMul",
+        ],
+        "compile": [
+            "StatefulSDPAFusion",
+            "SDPASubgraphFusion",
+            "CommonDecompositions",
+            "MultiplyFusions",
+            "ConvertSoftMax8ToSoftMax1",
+            "ConvertBroadcast3",
+            "RoPEFusionGPTNEOX",
+            "RoPEFusion",
+            "CausalMaskPreprocessFusion",
+            "RMSFusion",
+            "ConvertMatMulToFC",
+            "ConvertToPowerStatic",
+            "ConvertToSwishCPU",
+        ],
+    },
+    "muse_glimmer_assistant": {
+        "model_class": "OVAssistantForCausalLM",
+        "convert": [
+            "SDPAFusion",
+            "MakeStateful",
+        ],
+        "compile": [
+            "StatefulSDPAFusion",
+            "CommonDecompositions",
+            "ConvertBroadcast3",
+            "RoPEFusionGPTNEOX",
+            "RoPEFusion",
+            "RMSFusion",
+            "ConvertMatMulToFC",
+            "ConvertToSwishCPU",
+        ],
+    },
+    "minicpmv4_7": {
+        "convert": [
+            "SDPAFusion",
+            "MakeStateful",
+            "CommonFusions",
+            "TransposeConvert",
+        ],
+        "compile": [
+            "StatefulSDPAFusion",
+            "SDPASubgraphFusion",
+            "CommonDecompositions",
+            "MultiplyFusions",
+            "ConvertSoftMax8ToSoftMax1",
+            "ConvertBroadcast3",
+            "RoPEFusionGPTNEOX",
+            "RoPEFusionPreprocess",
+            "RoPEFusion",
+            "CausalMaskPreprocessFusion",
+            "RMSFusion",
+            "GatedDeltaNetFusion",
+            "ConvertTiledMoeBlockToGatherMatmuls",
+            "ConvertMatMulToFC",
+            "ConvertToPowerStatic",
+            "ConvertToSwishCPU",
+        ],
+    },
+    "minicpm_ocr": {
+        "convert": [
+            "SDPAFusion",
+            "MakeStateful",
+            "CommonFusions",
+            "TransposeConvert",
+        ],
+        "compile": [
+            "StatefulSDPAFusion",
+            "SDPASubgraphFusion",
+            "CommonDecompositions",
+            "MultiplyFusions",
+            "ConvertSoftMax8ToSoftMax1",
+            "ConvertBroadcast3",
+            "RoPEFusionGPTNEOX",
+            "RoPEFusionPreprocess",
+            "RoPEFusion",
+            "CausalMaskPreprocessFusion",
+            "RMSFusion",
+            "GatedDeltaNetFusion",
+            "ConvertMatMulToFC",
+            "ConvertToSwishCPU",
+        ],
+    },
+    "deepseek_ocr2": {
+        "model_class": "OVModelForVisualCausalLM",
+        "convert": [
+            "SDPAFusion",
+            "MakeStateful",
+            "TransposeMatMul",
+        ],
+        "compile": [
+            "StatefulSDPAFusion",
+            "SDPASubgraphFusion",
+            "CommonDecompositions",
+            "RoPEFusionGPTNEOX",
+            "RoPEFusionPreprocess",
+            "RoPEFusion",
+            "CausalMaskPreprocessFusion",
+            "ConvertSoftMax8ToSoftMax1",
+            "ConvertScatterElementsUpdate12ToScatterElementsUpdate3",
+            "ConvertBroadcast3",
+            "ConvertMatMulToFC",
+            "ConvertToPowerStatic",
+            "ConvertToSwishCPU",
+        ],
+    },
+    "ministral3": {
+        # ministral3 is the text-decoder config used inside Mistral3ForConditionalGeneration, so it
+        # is loaded through the VLM class even though the checked transformations are all in its
+        # decoder submodel (dense Mistral attention/RoPE/RMSNorm, no MoE routing).
+        "model_class": "OVModelForVisualCausalLM",
+        "convert": [
+            "SDPAFusion",
+            "MakeStateful",
+            "DecompressionHandling",
+        ],
+        "compile": [
+            "StatefulSDPAFusion",
+            "SDPASubgraphFusion",
+            "CommonDecompositions",
+            "RoPEFusionGPTNEOX",
+            "RoPEFusionPreprocess",
+            "RoPEFusion",
+            "CausalMaskPreprocessFusion",
+            "RMSFusion",
+            "MultiplyFusions",
+            "ConvertSoftMax8ToSoftMax1",
+            "ConvertBroadcast3",
+            "ConvertMatMulToFC",
+            "ConvertToPowerStatic",
+            "ConvertToSwishCPU",
+        ],
+    },
 }
 
 if is_transformers_version(">=", "5.0.0"):
@@ -275,11 +531,175 @@ if is_transformers_version(">=", "5.0.0"):
 
 
 # filter architectures depending on min/max transformers supported versions
+# Architectures exported through an out-of-tree library are not part of the transformers set,
+# so they are kept explicitly and gated on that library being installed.
+_NON_TRANSFORMERS_ARCHS = {"qwen3_tts": is_qwen_tts_available()}
+
 ARCH_TO_EXPECTED_TRANSFORMATIONS = {
     arch: v
     for arch, v in ARCH_TO_EXPECTED_TRANSFORMATIONS.items()
-    if arch in get_supported_model_for_library("transformers")
+    if arch in get_supported_model_for_library("transformers") or _NON_TRANSFORMERS_ARCHS.get(arch, False)
 }
+
+
+# Diffusion architectures are loaded through a pipeline class and live in the diffusers library (not
+# transformers), so they are added after the transformers filter above with an explicit `model_class`.
+# QwenImage's real-valued rotary embedding is written so the traced subgraph matches the GPT-NeoX
+# rotate-half matcher (`RoPEFusionGPTNEOX`), which OpenVINO fuses into the dedicated
+# `ov::op::internal::RoPE` op; the parent `RoPEFusion` pass reports it as applied.
+if is_diffusers_version(">=", "0.35.0"):
+    ARCH_TO_EXPECTED_TRANSFORMATIONS["qwenimage"] = {
+        "model_class": "OVDiffusionPipeline",
+        "convert": [],
+        "compile": [
+            "RoPEFusionGPTNEOX",
+            "RoPEFusion",
+        ],
+    }
+
+# Qwen-Image-2.1 rotates interleaved pairs; the exported graph de-interleaves them into the same rotate-half
+# layout, so its transformer RoPE fuses through the same GPT-NeoX matcher.
+if is_diffusers_version(">=", "0.41.0.dev0"):
+    ARCH_TO_EXPECTED_TRANSFORMATIONS["qwenimage21"] = {
+        "model_class": "OVDiffusionPipeline",
+        "convert": [
+            "CommonFusions",
+            "ConstantFolding",
+            "MOC",
+            "MultiplyFusions",
+            "ReshapeOptimizations",
+            "SDPAFusion",
+            "ShapeOfConstFolding",
+            "SharedOpOptimization",
+            "SmartReshape",
+        ],
+        "compile": [
+            "CommonDecompositions",
+            "CommonOptimizations",
+            "FullyConnectedBiasFusion",
+            "FuseTransposeBrgemm",
+            "RMSFusion",
+            "RoPEFusion",
+            "RoPEFusionGPTNEOX",
+            "RoPEFusionPreprocess",
+            "SDPASubgraphFusion",
+        ],
+    }
+
+
+if is_diffusers_version(">=", "0.38.0"):
+    ARCH_TO_EXPECTED_TRANSFORMATIONS["ltx2"] = {
+        "model_class": "OVLTX2Pipeline",
+        "convert": [
+            "SDPAFusion",
+            "PackMultiHeadAttention",
+            "CommonFusions",
+            "TransposeConvert",
+            "ReverseInputChannelsFusion",
+            "BroadcastTransition",
+        ],
+        "compile": [
+            "CausalMaskPreprocessFusion",
+            "CommonDecompositions",
+            "ConvertBroadcast3",
+            "ConvertMatMulToFC",
+            "ConvertSoftMax8ToSoftMax1",
+            "ConvertToCPUSpecificOpset",
+            "ConvertToPowerStatic",
+            "ConvertToSwishCPU",
+            "DecompressionHandling",
+            "LinOpSequenceFusion",
+            "MultiplyFusions",
+            "RoPEFusion",
+            "RoPEFusionGPTNEOX",
+            "SDPASubgraphFusion",
+            "Snippets",
+            "Tokenization",
+        ],
+    }
+
+if is_diffusers_version(">=", "0.40.0"):
+    _ltx2 = ARCH_TO_EXPECTED_TRANSFORMATIONS["ltx2"]
+    ARCH_TO_EXPECTED_TRANSFORMATIONS["ltx2.3"] = {
+        "model_class": "OVLTX2Pipeline",
+        "convert": list(_ltx2["convert"]),
+        "compile": list(_ltx2["compile"]),
+    }
+    if is_transformers_version(">=", "5.10.0"):
+        ARCH_TO_EXPECTED_TRANSFORMATIONS["ltx2.5"] = {
+            "model_class": "OVLTX2Pipeline",
+            # TransposeConvert has nothing to match in the LTX-2.5 export
+            "convert": [t for t in _ltx2["convert"] if t != "TransposeConvert"],
+            "compile": list(_ltx2["compile"]),
+        }
+
+
+if is_diffusers_version(">=", "0.33.0"):
+    ARCH_TO_EXPECTED_TRANSFORMATIONS["ltx-video-0.9.5"] = {
+        "model_class": "OVLTXPipeline",
+        "convert": [
+            "CommonFusions",
+            "ConstantFolding",
+            "MOC",
+            "ReshapeOptimizations",
+            "SDPAFusion",
+            "ShapeOfConstFolding",
+            "SharedOpOptimization",
+            "SmartReshape",
+        ],
+        "compile": [
+            "CausalMaskPreprocessFusion",
+            "CommonDecompositions",
+            "CommonOptimizations",
+            "ConvertBroadcast3",
+            "ConvertMatMulToFC",
+            "ConvertSoftMax8ToSoftMax1",
+            "ConvertToCPUSpecificOpset",
+            "ConvertToPowerStatic",
+            "ConvertToSwishCPU",
+            "DecompressionHandling",
+            "FullyConnectedBiasFusion",
+            "FuseTransposeBrgemm",
+            "LinOpSequenceFusion",
+            "MultiplyFusions",
+            "RMSFusion",
+            "RoPEFusion",
+            "RoPEFusionLtxVideo",
+            "SDPASubgraphFusion",
+            "Snippets",
+            "Tokenization",
+        ],
+    }
+
+
+if is_diffusers_version(">=", "0.37.0"):
+    ARCH_TO_EXPECTED_TRANSFORMATIONS["z-image"] = {
+        "model_class": "OVZImagePipeline",
+        "convert": [
+            "CommonFusions",
+            "SDPAFusion",
+            "TransposeFuse",
+        ],
+        "compile": [
+            "CausalMaskPreprocessFusion",
+            "CommonDecompositions",
+            "ConvertBroadcast3",
+            "ConvertMatMulToFC",
+            "ConvertSoftMax8ToSoftMax1",
+            "ConvertToCPUSpecificOpset",
+            "ConvertToPowerStatic",
+            "ConvertToSwishCPU",
+            "DecompressionHandling",
+            "MultiplyFusions",
+            "RMSFusion",
+            "RoPEFusion",
+            "RoPEFusionGPTNEOX",
+            "RoPEFusionPreprocess",
+            "SDPASubgraphFusion",
+            "Snippets",
+            "Tokenization",
+        ],
+    }
 
 
 def _get_flat_transforms(arch):
@@ -366,7 +786,9 @@ class OVTransformationTest(unittest.TestCase):
         expected_transforms = _get_flat_transforms(model_arch)
         model_id = MODEL_NAMES[model_arch]
         trust_remote_code = model_arch in REMOTE_CODE_MODELS
-        model_class = ARCH_TO_MODEL_CLASS.get(model_arch)
+        model_class = ARCH_TO_EXPECTED_TRANSFORMATIONS[model_arch].get("model_class") or ARCH_TO_MODEL_CLASS.get(
+            model_arch
+        )
 
         log_output = _capture_stderr_during(
             model_id,
